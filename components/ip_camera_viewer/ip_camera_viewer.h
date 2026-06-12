@@ -16,14 +16,14 @@ extern "C" {
 #include <netinet/in.h>
 
 namespace esphome {
-namespace network_camera {
+namespace ip_camera_viewer {
 
 enum class Protocol {
   MJPEG,
   RTSP,
 };
 
-class NetworkCamera : public Component {
+class IPCameraViewer : public Component {
  public:
   void setup() override;
   void loop() override;
@@ -170,5 +170,5 @@ class NetworkCamera : public Component {
   void convert_yuv420_to_rgb565_(uint8_t *yuv, uint8_t *rgb565, int width, int height);
 };
 
-}  // namespace network_camera
+}  // namespace ip_camera_viewer
 }  // namespace esphome

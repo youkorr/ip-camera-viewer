@@ -1,12 +1,12 @@
-#include "network_camera_switch.h"
+#include "ip_camera_viewer_switch.h"
 #include "esphome/core/log.h"
 
 namespace esphome {
-namespace network_camera {
+namespace ip_camera_viewer {
 
-static const char *const TAG = "network_camera.switch";
+static const char *const TAG = "ip_camera_viewer.switch";
 
-void NetworkCameraSwitch::setup() {
+void IPCameraViewerSwitch::setup() {
   // Restore previous state or default to OFF
   bool initial_state = false;
   this->rtc_ = global_preferences->make_preference<bool>(this->get_object_id_hash());
@@ -17,14 +17,14 @@ void NetworkCameraSwitch::setup() {
   }
 }
 
-void NetworkCameraSwitch::dump_config() {
-  LOG_SWITCH("", "Network Camera Switch", this);
+void IPCameraViewerSwitch::dump_config() {
+  LOG_SWITCH("", "IP Camera Viewer Switch", this);
 }
 
-void NetworkCameraSwitch::write_state(bool state) {
+void IPCameraViewerSwitch::write_state(bool state) {
   if (this->camera_ != nullptr) {
     this->camera_->set_enabled(state);
-    ESP_LOGI(TAG, "Network Camera %s", state ? "enabled" : "disabled");
+    ESP_LOGI(TAG, "IP Camera Viewer %s", state ? "enabled" : "disabled");
   }
 
   // Save state to RTC
@@ -34,5 +34,5 @@ void NetworkCameraSwitch::write_state(bool state) {
   this->publish_state(state);
 }
 
-}  // namespace network_camera
+}  // namespace ip_camera_viewer
 }  // namespace esphome

@@ -1,5 +1,5 @@
 """
-Build script for network_camera component
+Build script for ip_camera_viewer component
 Compiles esp_h264 decoder sources and links openh264 library
 """
 
@@ -10,7 +10,7 @@ script_dir = Dir('.').srcnode().abspath
 component_dir = script_dir
 parent_components_dir = os.path.dirname(component_dir)
 
-print("[Network Camera] Build script running...")
+print("[IP Camera Viewer] Build script running...")
 
 # ========================================================================
 # H.264 decoder: compile sources + link library
@@ -53,7 +53,7 @@ if os.path.exists(esp_h264_dir):
         if os.path.exists(src_path):
             obj = env.Object(src_path)
             h264_objects.extend(obj)
-            print(f"[Network Camera] + esp_h264/{src}")
+            print(f"[IP Camera Viewer] + esp_h264/{src}")
 
     if h264_objects:
         h264_dec_lib = env.StaticLibrary(
@@ -61,7 +61,7 @@ if os.path.exists(esp_h264_dir):
             h264_objects
         )
         env.Prepend(LIBS=[h264_dec_lib])
-        print(f"[Network Camera] Created libh264_decoder_nc.a with decoder sources")
+        print(f"[IP Camera Viewer] Created libh264_decoder_nc.a with decoder sources")
 
     # ========================================================================
     # Link H.264 libraries: openh264 (encoder/decoder) + tinyh264 (h264bsd decoder)
@@ -80,17 +80,17 @@ if os.path.exists(esp_h264_dir):
             openh264_lib,
             "-Wl,--no-whole-archive"
         ])
-        print(f"[Network Camera] Linked openh264 (Baseline/Main/High profiles)")
+        print(f"[IP Camera Viewer] Linked openh264 (Baseline/Main/High profiles)")
     else:
-        print(f"[Network Camera]  openh264 not found at {openh264_lib}")
+        print(f"[IP Camera Viewer]  openh264 not found at {openh264_lib}")
 
     # tinyh264 provides h264bsd* symbols needed by esp_h264_dec_sw.c
     if os.path.exists(tinyh264_lib):
         env.Append(LIBS=["tinyh264"])
-        print(f"[Network Camera] Linked tinyh264 (h264bsd decoder symbols)")
+        print(f"[IP Camera Viewer] Linked tinyh264 (h264bsd decoder symbols)")
     else:
-        print(f"[Network Camera]  tinyh264 not found at {tinyh264_lib}")
+        print(f"[IP Camera Viewer]  tinyh264 not found at {tinyh264_lib}")
 else:
-    print(f"[Network Camera]  esp_h264 component not found")
+    print(f"[IP Camera Viewer]  esp_h264 component not found")
 
-print("[Network Camera] Build script completed")
+print("[IP Camera Viewer] Build script completed")

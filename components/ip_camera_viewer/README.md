@@ -1,4 +1,4 @@
-# Network Camera Component for ESP32-P4
+# IP Camera Viewer Component for ESP32-P4
 
 ESPHome component to display network video streams (RTSP/H264 and MJPEG) on the
 ESP32-P4 with hardware decoding and LVGL display.
@@ -32,7 +32,7 @@ external_components:
       url: https://github.com/youkorr/network-camera
       ref: main
     components:
-      - network_camera
+      - ip_camera_viewer
     refresh: 0s
 ```
 
@@ -49,8 +49,8 @@ lvgl:
   displays:
     - display_id: my_display
 
-# Network camera configuration
-network_camera:
+# IP camera configuration
+ip_camera_viewer:
   - id: security_cam_1
     url: "http://<host>:1984/api/stream.mjpeg?src=frigate1_esp32"
     protocol: mjpeg
@@ -77,7 +77,7 @@ go2rtc:
 ### ESPHome configuration
 
 ```yaml
-network_camera:
+ip_camera_viewer:
   - id: security_cam_1
     url: "http://<host>/api/stream.mjpeg?src=frigate1_esp32"
     protocol: mjpeg
@@ -107,7 +107,7 @@ lvgl:
         - lambda: |-
             ESP_LOGI("security", "Security page loaded - configuring canvas");
 
-            // Configure the canvas for network_camera
+            // Configure the canvas for ip_camera_viewer
             auto canvas = id(security_canvas);
             if (canvas != nullptr) {
               lv_coord_t w = lv_obj_get_width(canvas);
@@ -188,7 +188,7 @@ globals:
 
 **Symptom:**
 ```
-[W][network_camera]: Canvas not configured
+[W][ip_camera_viewer]: Canvas not configured
 ```
 
 **Solution:**
@@ -201,15 +201,15 @@ on_load:
       id(security_cam_1).configure_canvas(canvas);
 ```
 
-**⚠️ IMPORTANT:** Call `configure_canvas()` on `security_cam_1` (network_camera),
+**⚠️ IMPORTANT:** Call `configure_canvas()` on `security_cam_1` (ip_camera_viewer),
 NOT on `security_display` (multi_camera_display)!
 
 ### Problem 2: "WiFi not ready yet"
 
 **Symptom:**
 ```
-[W][network_camera]: WiFi not ready yet, waiting for connection...
-[E][network_camera]: Host is unreachable (errno 118)
+[W][ip_camera_viewer]: WiFi not ready yet, waiting for connection...
+[E][ip_camera_viewer]: Host is unreachable (errno 118)
 ```
 
 **Solution:**
@@ -225,7 +225,7 @@ The component checks:
 
 **Symptom:**
 ```
-[E][network_camera]: jpeg_parse_com_marker(63): COM marker data underflow
+[E][ip_camera_viewer]: jpeg_parse_com_marker(63): COM marker data underflow
 ```
 
 **Solution:**
@@ -234,15 +234,15 @@ ffmpeg/go2rtc that are incompatible with the ESP32-P4 decoder.
 
 Expected logs:
 ```
-[I][network_camera]: Stripping COM marker at offset 2 (length 17 bytes)
-[D][network_camera]: Stripped COM markers: 1585 -> 1568 bytes (saved 17 bytes)
+[I][ip_camera_viewer]: Stripping COM marker at offset 2 (length 17 bytes)
+[D][ip_camera_viewer]: Stripped COM markers: 1585 -> 1568 bytes (saved 17 bytes)
 ```
 
 ### Problem 4: H264 "No frames decoded"
 
 **Symptom:**
 ```
-[W][network_camera]: No H264 frames decoded yet (1000 attempts)
+[W][ip_camera_viewer]: No H264 frames decoded yet (1000 attempts)
 ```
 
 **Solution:**
@@ -251,8 +251,8 @@ Expected logs:
 
 Expected logs:
 ```
-[I][network_camera]: Sent SPS+PPS (26+8 bytes) with FIRST frame (NAL type 1)
-[I][network_camera]: First frame decoded successfully! Decoder initialized and working.
+[I][ip_camera_viewer]: Sent SPS+PPS (26+8 bytes) with FIRST frame (NAL type 1)
+[I][ip_camera_viewer]: First frame decoded successfully! Decoder initialized and working.
 ```
 
 ### Problem 5: Canvas size 0x0
@@ -287,29 +287,29 @@ on_click:
 ### Working MJPEG
 
 ```
-[I][network_camera]: WiFi ready, starting camera...
-[I][network_camera]: MJPEG connected - Status: 200
-[I][network_camera]: First JPEG frame: 1585 bytes
-[I][network_camera]: Stripping COM marker at offset 2 (length 17 bytes)
-[I][network_camera]: First JPEG frame analysis:
-[I][network_camera]:   Size: 1568 bytes
-[I][network_camera]:   SOI marker: 0xFFD8 (valid FFD8)
-[I][network_camera]:   Format: Baseline DCT (SOF0) - fully supported
-[I][network_camera]: First JPEG decoded successfully: 153600 bytes output
-[I][network_camera]: Frames: 100 - FPS: 15.0
+[I][ip_camera_viewer]: WiFi ready, starting camera...
+[I][ip_camera_viewer]: MJPEG connected - Status: 200
+[I][ip_camera_viewer]: First JPEG frame: 1585 bytes
+[I][ip_camera_viewer]: Stripping COM marker at offset 2 (length 17 bytes)
+[I][ip_camera_viewer]: First JPEG frame analysis:
+[I][ip_camera_viewer]:   Size: 1568 bytes
+[I][ip_camera_viewer]:   SOI marker: 0xFFD8 (valid FFD8)
+[I][ip_camera_viewer]:   Format: Baseline DCT (SOF0) - fully supported
+[I][ip_camera_viewer]: First JPEG decoded successfully: 153600 bytes output
+[I][ip_camera_viewer]: Frames: 100 - FPS: 15.0
 ```
 
 ### Working H264
 
 ```
-[I][network_camera]: WiFi ready, starting camera...
-[I][network_camera]: RTSP connected
-[I][network_camera]: SPS received: 26 bytes
-[I][network_camera]: PPS received: 8 bytes
-[I][network_camera]: Sent SPS+PPS (26+8 bytes) with FIRST frame (NAL type 1)
-[I][network_camera]: Frame #1: NAL type 1 (P-frame), size 2847 bytes
-[I][network_camera]: First frame decoded successfully! Decoder initialized and working.
-[I][network_camera]:   Decoded YUV size: 115200 bytes
+[I][ip_camera_viewer]: WiFi ready, starting camera...
+[I][ip_camera_viewer]: RTSP connected
+[I][ip_camera_viewer]: SPS received: 26 bytes
+[I][ip_camera_viewer]: PPS received: 8 bytes
+[I][ip_camera_viewer]: Sent SPS+PPS (26+8 bytes) with FIRST frame (NAL type 1)
+[I][ip_camera_viewer]: Frame #1: NAL type 1 (P-frame), size 2847 bytes
+[I][ip_camera_viewer]: First frame decoded successfully! Decoder initialized and working.
+[I][ip_camera_viewer]:   Decoded YUV size: 115200 bytes
 ```
 
 ## ⚙️ H264/RTSP configuration
@@ -317,7 +317,7 @@ on_click:
 ### Tapo camera configuration
 
 ```yaml
-network_camera:
+ip_camera_viewer:
   - id: security_cam_1
     url: "rtsp://username:password@192.168.1.56:554/stream2"
     protocol: h264
@@ -347,7 +347,7 @@ go2rtc:
 ## 🎯 Multi-camera configuration
 
 ```yaml
-network_camera:
+ip_camera_viewer:
   - id: security_cam_1
     url: "http://192.168.1.38:1984/api/stream.mjpeg?src=cam1"
     protocol: mjpeg
@@ -387,29 +387,29 @@ bool is_running = id(security_cam_1).is_enabled();
 1. **Critical H264 SPS/PPS fix**
    - Sends SPS/PPS with the FIRST frame (not only I-frames)
    - Avoids "No frames decoded" when the stream starts with P-frames
-   - File: `network_camera.cpp`
+   - File: `ip_camera_viewer.cpp`
 
 2. **MJPEG COM marker fix**
    - Strips COM markers (FF FE) added by ffmpeg
    - The ESP32-P4 hardware decoder does not support COM markers
    - Function: `strip_jpeg_com_markers_()`
-   - File: `network_camera.cpp`
+   - File: `ip_camera_viewer.cpp`
 
 3. **JPEG timeout fix**
    - Timeout increased from 40 ms -> 100 ms
    - Required for network latency
-   - File: `network_camera.cpp`
+   - File: `ip_camera_viewer.cpp`
 
 4. **WiFi timing fix**
    - Automatically waits for the WiFi connection
    - 15 s delay between attempts
    - Checks `is_connected()` and `has_sta()`
-   - File: `network_camera.cpp`
+   - File: `ip_camera_viewer.cpp`
 
 5. **WiFi API compatibility fix**
    - Replaces `get_ip_address()` with `has_sta()`
    - Compatible with newer ESPHome versions
-   - File: `network_camera.cpp`
+   - File: `ip_camera_viewer.cpp`
 
 ### Data format
 
@@ -433,7 +433,7 @@ bool is_running = id(security_cam_1).is_enabled();
 logger:
   level: DEBUG
   logs:
-    network_camera: DEBUG
+    ip_camera_viewer: DEBUG
 ```
 
 ### Test the stream

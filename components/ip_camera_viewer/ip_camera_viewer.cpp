@@ -1,4 +1,4 @@
-#include "network_camera.h"
+#include "ip_camera_viewer.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 #include "esphome/components/wifi/wifi_component.h"
@@ -13,9 +13,9 @@
 #include "esp_task_wdt.h"
 
 namespace esphome {
-namespace network_camera {
+namespace ip_camera_viewer {
 
-static const char *const TAG = "network_camera";
+static const char *const TAG = "ip_camera_viewer";
 
 // Maximum buffer sizes - adaptive based on resolution
 // Small resolution (640x480): 128KB JPEG buffer
@@ -24,8 +24,8 @@ static const char *const TAG = "network_camera";
 static const size_t MAX_JPEG_SIZE = 512 * 1024;  // 512KB for JPEG (max)
 static const size_t MAX_H264_SIZE = 256 * 1024;  // 256KB for H264 NAL units
 
-void NetworkCamera::setup() {
-  ESP_LOGCONFIG(TAG, "Setting up Network Camera...");
+void IPCameraViewer::setup() {
+  ESP_LOGCONFIG(TAG, "Setting up IP Camera Viewer...");
   ESP_LOGI(TAG, "  URL: %s", this->url_.c_str());
   ESP_LOGI(TAG, "  Protocol: %s", this->protocol_ == Protocol::RTSP ? "RTSP/H264" : "MJPEG");
   ESP_LOGI(TAG, "  Resolution: %ux%u", this->width_, this->height_);
@@ -51,10 +51,10 @@ void NetworkCamera::setup() {
     }
   }
 
-  ESP_LOGI(TAG, "Network Camera initialized");
+  ESP_LOGI(TAG, "IP Camera Viewer initialized");
 }
 
-void NetworkCamera::loop() {
+void IPCameraViewer::loop() {
   // Start timer when enabled
   if (this->enabled_ && this->lvgl_timer_ == nullptr) {
     uint32_t now = millis();
@@ -93,7 +93,7 @@ void NetworkCamera::loop() {
 
     // WiFi is READY - proceed with connection
     ESP_LOGI(TAG, "✓ WiFi ready, starting camera...");
-    ESP_LOGI(TAG, "Starting Network Camera display...");
+    ESP_LOGI(TAG, "Starting IP Camera Viewer display...");
     this->connection_attempts_++;
     this->last_connection_attempt_ = now;
 
@@ -140,13 +140,13 @@ void NetworkCamera::loop() {
     if (this->lvgl_timer_ == nullptr) {
       ESP_LOGE(TAG, "Failed to create LVGL timer");
     } else {
-      ESP_LOGI(TAG, "Network Camera display started");
+      ESP_LOGI(TAG, "IP Camera Viewer display started");
     }
   }
 
   // Stop timer when disabled
   if (!this->enabled_ && this->lvgl_timer_ != nullptr) {
-    ESP_LOGI(TAG, "Stopping Network Camera display...");
+    ESP_LOGI(TAG, "Stopping IP Camera Viewer display...");
     lv_timer_del(this->lvgl_timer_);
     this->lvgl_timer_ = nullptr;
 
@@ -161,11 +161,11 @@ void NetworkCamera::loop() {
     ESP_LOGI(TAG, "Freeing PSRAM buffers...");
     this->free_buffers_();
 
-    ESP_LOGI(TAG, "Network Camera display stopped and buffers freed");
+    ESP_LOGI(TAG, "IP Camera Viewer display stopped and buffers freed");
   }
 }
 
-void NetworkCamera::check_network_quality_() {
+void IPCameraViewer::check_network_quality_() {
   // Check network quality periodically
   uint32_t now = millis();
   if (now - this->last_quality_check_ < this->quality_check_interval_) {
@@ -201,7 +201,7 @@ void NetworkCamera::check_network_quality_() {
   }
 }
 
-void NetworkCamera::adapt_to_network_() {
+void IPCameraViewer::adapt_to_network_() {
   // Adapt update interval based on network quality
   // This reduces CPU load and network bandwidth on poor connections
   uint32_t old_interval = this->update_interval_;
@@ -228,8 +228,8 @@ void NetworkCamera::adapt_to_network_() {
   }
 }
 
-void NetworkCamera::lvgl_timer_callback_(lv_timer_t *timer) {
-  NetworkCamera *cam = static_cast<NetworkCamera *>(lv_timer_get_user_data(timer));
+void IPCameraViewer::lvgl_timer_callback_(lv_timer_t *timer) {
+  IPCameraViewer *cam = static_cast<IPCameraViewer *>(lv_timer_get_user_data(timer));
   if (cam == nullptr || !cam->stream_connected_) {
     return;
   }
@@ -282,7 +282,7 @@ void NetworkCamera::lvgl_timer_callback_(lv_timer_t *timer) {
   }
 }
 
-bool NetworkCamera::init_buffers_() {
+bool IPCameraViewer::init_buffers_() {
   // ESP32-P4 JPEG decoder requires dimensions to be 16-byte aligned
   // Round up to nearest multiple of 16
   uint32_t aligned_width = (this->width_ + 15) & ~15;
@@ -390,7 +390,7 @@ bool NetworkCamera::init_buffers_() {
   return true;
 }
 
-void NetworkCamera::free_buffers_() {
+void IPCameraViewer::free_buffers_() {
   // Free RGB565 buffers
   if (this->rgb565_buffer_a_ != nullptr) {
     free(this->rgb565_buffer_a_);
@@ -439,7 +439,7 @@ void NetworkCamera::free_buffers_() {
            free_sram, free_sram / 1024.0);
 }
 
-bool NetworkCamera::init_jpeg_decoder_() {
+bool IPCameraViewer::init_jpeg_decoder_() {
   jpeg_decode_engine_cfg_t decode_eng_cfg = {
       .intr_priority = 0,
       .timeout_ms = 200,  // 200ms timeout - increased for network streams with variable latency
@@ -455,7 +455,7 @@ bool NetworkCamera::init_jpeg_decoder_() {
   return true;
 }
 
-bool NetworkCamera::init_h264_decoder_() {
+bool IPCameraViewer::init_h264_decoder_() {
   esp_h264_dec_cfg_sw_t dec_cfg = {};
   dec_cfg.pic_type = ESP_H264_RAW_FMT_I420;
   dec_cfg.profile_idc = ESP_H264_PROFILE_AUTO;  // openh264 supports all profiles - auto-detect
@@ -480,7 +480,7 @@ bool NetworkCamera::init_h264_decoder_() {
 // MJPEG Methods
 // ============================================================================
 
-bool NetworkCamera::connect_mjpeg_stream_() {
+bool IPCameraViewer::connect_mjpeg_stream_() {
   if (this->stream_connected_) {
     return true;
   }
@@ -541,7 +541,7 @@ bool NetworkCamera::connect_mjpeg_stream_() {
   return true;
 }
 
-void NetworkCamera::disconnect_mjpeg_stream_() {
+void IPCameraViewer::disconnect_mjpeg_stream_() {
   if (this->http_client_ != nullptr) {
     esp_http_client_close(this->http_client_);
     esp_http_client_cleanup(this->http_client_);
@@ -550,7 +550,7 @@ void NetworkCamera::disconnect_mjpeg_stream_() {
   this->stream_connected_ = false;
 }
 
-bool NetworkCamera::fetch_jpeg_frame_() {
+bool IPCameraViewer::fetch_jpeg_frame_() {
   if (!this->stream_connected_ || this->http_client_ == nullptr) {
     return false;
   }
@@ -686,7 +686,7 @@ bool NetworkCamera::fetch_jpeg_frame_() {
 // - SOI (FF D8), DQT (FF DB), DHT (FF C4), SOF0 (FF C0), SOS (FF DA), EOI (FF D9)
 // - Scan data (between SOS and EOI)
 // ALL other markers must be removed: APP0-15, COM, DRI, RST, etc.
-size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
+size_t IPCameraViewer::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
   if (len < 4) return len;
 
   // DEBUG: Disabled to reduce log verbosity
@@ -913,13 +913,13 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
   return write_pos;
 }
 
-size_t NetworkCamera::strip_jpeg_restart_markers_(uint8_t *data, size_t len) {
+size_t IPCameraViewer::strip_jpeg_restart_markers_(uint8_t *data, size_t len) {
   // This function is now integrated into strip_jpeg_com_markers_
   // Keep for compatibility but it does nothing
   return len;
 }
 
-bool NetworkCamera::decode_jpeg_to_rgb565_() {
+bool IPCameraViewer::decode_jpeg_to_rgb565_() {
   if (this->jpeg_data_len_ == 0 || this->jpeg_decoder_ == nullptr) {
     return false;
   }
@@ -1044,7 +1044,7 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
 // RTSP Methods
 // ============================================================================
 
-bool NetworkCamera::connect_rtsp_stream_() {
+bool IPCameraViewer::connect_rtsp_stream_() {
   if (this->stream_connected_) {
     return true;
   }
@@ -1284,7 +1284,7 @@ bool NetworkCamera::connect_rtsp_stream_() {
   return true;
 }
 
-void NetworkCamera::disconnect_rtsp_stream_() {
+void IPCameraViewer::disconnect_rtsp_stream_() {
   if (this->rtsp_socket_ >= 0) {
     // Send TEARDOWN
     if (!this->rtsp_session_.empty()) {
@@ -1310,7 +1310,7 @@ void NetworkCamera::disconnect_rtsp_stream_() {
   this->h264_data_len_ = 0;
 }
 
-bool NetworkCamera::send_rtsp_request_(const std::string &method, const std::string &url,
+bool IPCameraViewer::send_rtsp_request_(const std::string &method, const std::string &url,
                                        const std::string &extra_headers, std::string *response_body) {
   char request[768];
 
@@ -1370,7 +1370,7 @@ bool NetworkCamera::send_rtsp_request_(const std::string &method, const std::str
   return true;
 }
 
-bool NetworkCamera::fetch_rtp_frame_() {
+bool IPCameraViewer::fetch_rtp_frame_() {
   if (this->rtsp_socket_ < 0) {
     return false;
   }
@@ -1637,7 +1637,7 @@ bool NetworkCamera::fetch_rtp_frame_() {
   return false;
 }
 
-bool NetworkCamera::decode_h264_to_yuv_() {
+bool IPCameraViewer::decode_h264_to_yuv_() {
   if (this->h264_data_len_ == 0 || this->h264_decoder_ == nullptr) {
     return false;
   }
@@ -1708,7 +1708,7 @@ bool NetworkCamera::decode_h264_to_yuv_() {
   return frame_decoded;
 }
 
-void NetworkCamera::convert_yuv420_to_rgb565_(uint8_t *yuv, uint8_t *rgb565, int width, int height) {
+void IPCameraViewer::convert_yuv420_to_rgb565_(uint8_t *yuv, uint8_t *rgb565, int width, int height) {
   // YUV420 (I420) layout:
   // Y plane: width * height bytes
   // U plane: (width/2) * (height/2) bytes
@@ -1749,7 +1749,7 @@ void NetworkCamera::convert_yuv420_to_rgb565_(uint8_t *yuv, uint8_t *rgb565, int
 // Common Methods
 // ============================================================================
 
-void NetworkCamera::update_canvas_() {
+void IPCameraViewer::update_canvas_() {
   if (this->canvas_obj_ == nullptr) {
     if (!this->canvas_warning_shown_) {
       ESP_LOGW(TAG, "Canvas not configured");
@@ -1763,24 +1763,24 @@ void NetworkCamera::update_canvas_() {
   lv_obj_invalidate(this->canvas_obj_);
 }
 
-void NetworkCamera::swap_buffers_() {
+void IPCameraViewer::swap_buffers_() {
   uint8_t *temp = this->current_display_buffer_;
   this->current_display_buffer_ = this->current_decode_buffer_;
   this->current_decode_buffer_ = temp;
 }
 
-void NetworkCamera::configure_canvas(lv_obj_t *canvas) {
+void IPCameraViewer::configure_canvas(lv_obj_t *canvas) {
   this->canvas_obj_ = canvas;
   ESP_LOGD(TAG, "Canvas configured: %p (will render at %ux%u)", canvas, this->width_, this->height_);
 }
 
-void NetworkCamera::dump_config() {
-  ESP_LOGCONFIG(TAG, "Network Camera:");
+void IPCameraViewer::dump_config() {
+  ESP_LOGCONFIG(TAG, "IP Camera Viewer:");
   ESP_LOGCONFIG(TAG, "  URL: %s", this->url_.c_str());
   ESP_LOGCONFIG(TAG, "  Protocol: %s", this->protocol_ == Protocol::RTSP ? "RTSP/H264" : "MJPEG");
   ESP_LOGCONFIG(TAG, "  Resolution: %ux%u", this->width_, this->height_);
   ESP_LOGCONFIG(TAG, "  Update interval: %u ms", this->update_interval_);
 }
 
-}  // namespace network_camera
+}  // namespace ip_camera_viewer
 }  // namespace esphome

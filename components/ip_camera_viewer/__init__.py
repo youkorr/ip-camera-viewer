@@ -4,7 +4,7 @@ from esphome.const import CONF_ID, CONF_URL
 import os
 
 DEPENDENCIES = ["wifi"]
-CODEOWNERS = ["@esphome"]
+CODEOWNERS = ["@youkorr"]
 
 CONF_CANVAS_ID = "canvas_id"
 CONF_UPDATE_INTERVAL = "update_interval"
@@ -12,12 +12,12 @@ CONF_WIDTH = "width"
 CONF_HEIGHT = "height"
 CONF_PROTOCOL = "protocol"
 
-network_camera_ns = cg.esphome_ns.namespace("network_camera")
-NetworkCamera = network_camera_ns.class_("NetworkCamera", cg.Component)
+ip_camera_viewer_ns = cg.esphome_ns.namespace("ip_camera_viewer")
+IPCameraViewer = ip_camera_viewer_ns.class_("IPCameraViewer", cg.Component)
 
 # Single camera schema
-NETWORK_CAMERA_SCHEMA = cv.Schema({
-    cv.GenerateID(): cv.declare_id(NetworkCamera),
+IP_CAMERA_VIEWER_SCHEMA = cv.Schema({
+    cv.GenerateID(): cv.declare_id(IPCameraViewer),
     cv.Required(CONF_URL): cv.string,
     cv.Required(CONF_CANVAS_ID): cv.string,
     cv.Required(CONF_WIDTH): cv.int_range(min=16, max=1920),
@@ -28,7 +28,7 @@ NETWORK_CAMERA_SCHEMA = cv.Schema({
 
 # Support multiple cameras as a list
 CONFIG_SCHEMA = cv.All(
-    cv.ensure_list(NETWORK_CAMERA_SCHEMA),
+    cv.ensure_list(IP_CAMERA_VIEWER_SCHEMA),
 )
 
 
@@ -59,7 +59,7 @@ async def to_code(config):
                 cg.add_build_flag(f"-I{inc_path}")
 
     # Add PlatformIO build script for H.264 library linking and source compilation
-    build_script = os.path.join(os.path.dirname(__file__), "network_camera_build.py")
+    build_script = os.path.join(os.path.dirname(__file__), "ip_camera_viewer_build.py")
     cg.add_platformio_option("extra_scripts", ["post:" + build_script])
 
     # Process each camera in the list

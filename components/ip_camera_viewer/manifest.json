@@ -1,0 +1,7 @@
+{
+  "name": "IP Camera Viewer",
+  "description": "Stream IP cameras (RTSP/MJPEG) to LVGL display with hardware H264 decoding",
+  "version": "1.0.0",
+  "codeowners": ["@youkorr"],
+  "dependencies": ["wifi"]
+}
