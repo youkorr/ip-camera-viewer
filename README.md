@@ -454,8 +454,27 @@ ffplay -rtsp_transport tcp rtsp://user:pass@192.168.1.56:554/stream2
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
-for details.
+The source code of this component is original work by youkorr. Because it is an
+ESPHome external component, it follows the **same dual-license arrangement as
+ESPHome** so the two can be combined and distributed without any license
+conflict:
+
+- **C++/runtime code** (`.c`, `.cpp`, `.h`, `.hpp`, `.tcc`, `.ino`) is licensed
+  under the **GPLv3** (it is compiled and linked against ESPHome's GPLv3 C++
+  runtime).
+- **Python code and all other parts** of this repository are licensed under the
+  **MIT** license.
+
+See the [LICENSE](LICENSE) file for the full text of both licenses.
+
+### Third-party acknowledgements
+
+- **ESPHome** (https://github.com/esphome/esphome) — Copyright (c) 2019 ESPHome,
+  dual-licensed MIT/GPLv3.
+- **Espressif ESP-IDF** components (ESP32-P4 hardware JPEG decoder, `esp_h264`
+  decoder, etc.) — Copyright (c) Espressif Systems, licensed under their own
+  terms (predominantly Apache-2.0). No Espressif source code is redistributed in
+  this repository; only its public APIs are used at build time.
 
 ## 🙏 Support
 
