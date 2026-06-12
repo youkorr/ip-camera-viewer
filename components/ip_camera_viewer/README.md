@@ -3,25 +3,25 @@
 ESPHome component to display network video streams (RTSP/H264 and MJPEG) on the
 ESP32-P4 with hardware decoding and LVGL display.
 
-## 📋 Features
+## Features
 
-- ✅ **MJPEG support** - Hardware JPEG decoding optimized for network streams
-- ✅ **H264/RTSP support** - Software H264 decoding (Baseline/Main Profile)
-- ✅ **Hardware decoding** - ESP32-P4 hardware JPEG decoder (100 ms timeout)
-- ✅ **COM marker stripping** - ffmpeg/go2rtc MJPEG compatibility
-- ✅ **WiFi handling** - Automatic wait for the WiFi connection (15 s retry delay)
-- ✅ **LVGL display** - Native integration with an LVGL canvas
-- ✅ **RGB565** - Color format optimized for display
-- ✅ **Multi-resolution** - Supports 320x240, 640x480, etc.
+- **MJPEG support** - Hardware JPEG decoding optimized for network streams
+- **H264/RTSP support** - Software H264 decoding (Baseline/Main Profile)
+- **Hardware decoding** - ESP32-P4 hardware JPEG decoder (100 ms timeout)
+- **COM marker stripping** - ffmpeg/go2rtc MJPEG compatibility
+- **WiFi handling** - Automatic wait for the WiFi connection (15 s retry delay)
+- **LVGL display** - Native integration with an LVGL canvas
+- **RGB565** - Color format optimized for display
+- **Multi-resolution** - Supports 320x240, 640x480, etc.
 
-## 🔧 Requirements
+## Requirements
 
 - **Hardware:** ESP32-P4 (with hardware JPEG decoder)
 - **ESPHome:** Recent version with ESP32-P4 support
 - **LVGL:** Configured LVGL component
 - **Network:** Configured and working WiFi
 
-## 📦 Installation
+## Installation
 
 ### 1. Add the external component
 
@@ -60,7 +60,7 @@ ip_camera_viewer:
     update_interval: 100ms
 ```
 
-## 🎬 MJPEG configuration (recommended)
+## MJPEG configuration (recommended)
 
 ### go2rtc configuration
 
@@ -88,13 +88,13 @@ ip_camera_viewer:
 ```
 
 **Why MJPEG?**
-- ✅ Hardware decoding (fast and efficient)
-- ✅ Low latency
-- ✅ No H264 profile issues
-- ✅ COM markers automatically stripped
-- ✅ Built-in JPEG validation
+- Hardware decoding (fast and efficient)
+- Low latency
+- No H264 profile issues
+- COM markers automatically stripped
+- Built-in JPEG validation
 
-## 📺 LVGL integration
+## LVGL integration
 
 ### Full configuration with buttons
 
@@ -182,7 +182,7 @@ globals:
     initial_value: 'false'
 ```
 
-## 🔍 Troubleshooting
+## Troubleshooting
 
 ### Problem 1: "Canvas not configured"
 
@@ -201,7 +201,7 @@ on_load:
       id(security_cam_1).configure_canvas(canvas);
 ```
 
-**⚠️ IMPORTANT:** Call `configure_canvas()` on `security_cam_1` (ip_camera_viewer),
+**IMPORTANT:** Call `configure_canvas()` on `security_cam_1` (ip_camera_viewer),
 NOT on `security_display` (multi_camera_display)!
 
 ### Problem 2: "WiFi not ready yet"
@@ -229,7 +229,7 @@ The component checks:
 ```
 
 **Solution:**
-✅ **Already fixed!** The component automatically strips the COM markers added by
+**Already fixed!** The component automatically strips the COM markers added by
 ffmpeg/go2rtc that are incompatible with the ESP32-P4 decoder.
 
 Expected logs:
@@ -246,7 +246,7 @@ Expected logs:
 ```
 
 **Solution:**
-✅ **Already fixed!** The component now sends SPS/PPS with the **first frame**
+**Already fixed!** The component now sends SPS/PPS with the **first frame**
 (I-frame or P-frame), not only with I-frames.
 
 Expected logs:
@@ -282,7 +282,7 @@ on_click:
         id(security_cam_1).set_enabled(true);
 ```
 
-## 📊 Success logs
+## Success logs
 
 ### Working MJPEG
 
@@ -312,7 +312,7 @@ on_click:
 [I][ip_camera_viewer]:   Decoded YUV size: 115200 bytes
 ```
 
-## ⚙️ H264/RTSP configuration
+## H264/RTSP configuration
 
 ### Tapo camera configuration
 
@@ -336,15 +336,15 @@ go2rtc:
       - rtsp://username:password@192.168.1.56:554/stream1
 ```
 
-**⚠️ H264 limitations:**
+**H264 limitations:**
 - Supports **Baseline** and **Main Profile** only
 - **High Profile** (Tapo C500 default) is not supported
 - A large GOP can cause delays
 - Slower than MJPEG (software decoding)
 
-**💡 Recommendation:** Use MJPEG via go2rtc for better performance!
+**Recommendation:** Use MJPEG via go2rtc for better performance!
 
-## 🎯 Multi-camera configuration
+## Multi-camera configuration
 
 ```yaml
 ip_camera_viewer:
@@ -363,7 +363,7 @@ ip_camera_viewer:
     canvas_id: canvas2
 ```
 
-## 📝 Lambda API
+## Lambda API
 
 ### Available methods
 
@@ -380,7 +380,7 @@ id(security_cam_1).configure_canvas(canvas);
 bool is_running = id(security_cam_1).is_enabled();
 ```
 
-## 🔬 Technical details
+## Technical details
 
 ### Applied fixes
 
@@ -425,7 +425,7 @@ bool is_running = id(security_cam_1).is_enabled();
 - **SRAM memory:** ~220 KB
 - **PSRAM memory:** ~6.7 MB
 
-## 🐛 Debugging
+## Debugging
 
 ### Enable verbose logs
 
@@ -446,18 +446,20 @@ http://192.168.1.38:1984/api/stream.mjpeg?src=frigate1_esp32
 ffplay -rtsp_transport tcp rtsp://user:pass@192.168.1.56:554/stream2
 ```
 
-## 📚 Resources
+## Resources
 
 - **Repository:** https://github.com/youkorr/ip-camera-viewer
 - **ESPHome:** https://esphome.io
 - **go2rtc:** https://github.com/AlexxIT/go2rtc
 
-## 📄 License
+## License
 
-The source code of this component is original work by youkorr. Because it is an
-ESPHome external component, it follows the **same dual-license arrangement as
-ESPHome** so the two can be combined and distributed without any license
-conflict:
+This component was created and is maintained solely by **youkorr**. It is the
+author's original work: it does not reuse or redistribute any ESPHome or
+Espressif source code, and only relies on their public APIs at build time.
+Because it is an ESPHome external component, it follows the **same dual-license
+arrangement as ESPHome** so the two can be combined and distributed without any
+license conflict:
 
 - **C++/runtime code** (`.c`, `.cpp`, `.h`, `.hpp`, `.tcc`, `.ino`) is licensed
   under the **GPLv3** (it is compiled and linked against ESPHome's GPLv3 C++
@@ -476,7 +478,7 @@ See the [LICENSE](LICENSE) file for the full text of both licenses.
   terms (predominantly Apache-2.0). No Espressif source code is redistributed in
   this repository; only its public APIs are used at build time.
 
-## 🙏 Support
+## Support
 
 For problems or questions:
 1. Check the "Troubleshooting" section above
@@ -485,4 +487,5 @@ For problems or questions:
 
 ---
 
+**Author:** youkorr
 **Version:** 1.0.0
