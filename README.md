@@ -29,7 +29,7 @@ ESP32-P4 with hardware decoding and LVGL display.
 external_components:
   - source:
       type: git
-      url: https://github.com/youkorr/network-camera
+      url: https://github.com/youkorr/ip-camera-viewer
       ref: main
     components:
       - ip_camera_viewer
@@ -448,7 +448,7 @@ ffplay -rtsp_transport tcp rtsp://user:pass@192.168.1.56:554/stream2
 
 ## 📚 Resources
 
-- **Repository:** https://github.com/youkorr/network-camera
+- **Repository:** https://github.com/youkorr/ip-camera-viewer
 - **ESPHome:** https://esphome.io
 - **go2rtc:** https://github.com/AlexxIT/go2rtc
 
