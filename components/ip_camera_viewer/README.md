@@ -363,6 +363,40 @@ ip_camera_viewer:
     canvas_id: canvas2
 ```
 
+## Switch (enable / disable the camera)
+
+A `switch` platform is provided to turn each camera on or off from Home
+Assistant or the ESPHome UI. The switch enables/disables the referenced
+`ip_camera_viewer` instance and **persists its state** across reboots (restored
+on boot, defaults to OFF).
+
+```yaml
+ip_camera_viewer:
+  - id: security_cam_1
+    url: "http://<host>/api/stream.mjpeg?src=cam1"
+    protocol: mjpeg
+    width: 320
+    height: 240
+    canvas_id: security_canvas
+
+switch:
+  - platform: ip_camera_viewer
+    name: "Security Camera 1"
+    camera_id: security_cam_1
+```
+
+Configuration variables:
+
+- **name** (*Required*, string): the name of the switch.
+- **camera_id** (*Required*, ID): the ID of the `ip_camera_viewer` instance to
+  control.
+- All other options from the [base Switch
+  component](https://esphome.io/components/switch/index.html) (`id`, `icon`,
+  `restore_mode`, etc.) are supported.
+
+Turning the switch on is equivalent to calling `set_enabled(true)` on the
+camera; turning it off calls `set_enabled(false)`.
+
 ## Lambda API
 
 ### Available methods
