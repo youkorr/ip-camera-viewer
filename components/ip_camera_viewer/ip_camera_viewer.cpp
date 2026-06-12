@@ -65,7 +65,7 @@ void IPCameraViewer::loop() {
       // Log only on first attempt or every 30 seconds to avoid spam
       static uint32_t last_wifi_log = 0;
       if (this->connection_attempts_ == 0 || (now - last_wifi_log) > 30000) {
-        ESP_LOGW(TAG, "⏳ WiFi not ready yet, waiting for connection...");
+        ESP_LOGW(TAG, "WiFi not ready yet, waiting for connection...");
         last_wifi_log = now;
       }
       this->last_connection_attempt_ = now;
@@ -77,7 +77,7 @@ void IPCameraViewer::loop() {
     if (!wifi_component->has_sta()) {
       static uint32_t last_ip_log = 0;
       if ((now - last_ip_log) > 30000) {
-        ESP_LOGW(TAG, "⏳ WiFi connected but no STA interface yet, waiting...");
+        ESP_LOGW(TAG, "WiFi connected but no STA interface yet, waiting...");
         last_ip_log = now;
       }
       this->last_connection_attempt_ = now;
@@ -92,7 +92,7 @@ void IPCameraViewer::loop() {
     }
 
     // WiFi is READY - proceed with connection
-    ESP_LOGI(TAG, "✓ WiFi ready, starting camera...");
+    ESP_LOGI(TAG, "WiFi ready, starting camera...");
     ESP_LOGI(TAG, "Starting IP Camera Viewer display...");
     this->connection_attempts_++;
     this->last_connection_attempt_ = now;
@@ -195,7 +195,7 @@ void IPCameraViewer::check_network_quality_() {
   // Log quality changes
   if (old_level != this->current_quality_level_) {
     const char *quality_names[] = {"LOW", "MEDIUM", "HIGH"};
-    ESP_LOGI(TAG, "Network quality changed: %s → %s (RSSI: %d dBm)",
+    ESP_LOGI(TAG, "Network quality changed: %s -> %s (RSSI: %d dBm)",
              quality_names[old_level], quality_names[this->current_quality_level_], rssi);
     this->adapt_to_network_();
   }
@@ -224,7 +224,7 @@ void IPCameraViewer::adapt_to_network_() {
   // Update LVGL timer period if active
   if (this->lvgl_timer_ != nullptr && old_interval != this->update_interval_) {
     lv_timer_set_period(this->lvgl_timer_, this->update_interval_);
-    ESP_LOGI(TAG, "Timer period updated: %u ms → %u ms", old_interval, this->update_interval_);
+    ESP_LOGI(TAG, "Timer period updated: %u ms -> %u ms", old_interval, this->update_interval_);
   }
 }
 
@@ -288,7 +288,7 @@ bool IPCameraViewer::init_buffers_() {
   uint32_t aligned_width = (this->width_ + 15) & ~15;
   uint32_t aligned_height = (this->height_ + 15) & ~15;
 
-  ESP_LOGI(TAG, "Image dimensions: %ux%u (configured) → %ux%u (16-byte aligned)",
+  ESP_LOGI(TAG, "Image dimensions: %ux%u (configured) -> %ux%u (16-byte aligned)",
            this->width_, this->height_, aligned_width, aligned_height);
 
   // RGB565 buffer size: aligned_width * aligned_height * 2 bytes
@@ -609,7 +609,7 @@ bool IPCameraViewer::fetch_jpeg_frame_() {
   // Append to parse buffer
   if (this->parse_buffer_len_ + read_len > this->parse_buffer_size_) {
     // CRITICAL: Buffer overflow - discard corrupted data and reset state machine
-    // Keeping partial buffer would create truncated JPEG → DMA2D crash!
+    // Keeping partial buffer would create truncated JPEG -> DMA2D crash!
     // Instead, clear everything and search for next complete JPEG frame
     static uint32_t overflow_count = 0;
     if (overflow_count++ < 5) {
@@ -744,7 +744,7 @@ size_t IPCameraViewer::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
       // Only check this OUTSIDE scan data (before SOS or after EOI)
       if (marker == 0xD8 && read_pos > 2) {
         if (debug_markers) {
-          ESP_LOGW(TAG, "  ⚠️ CONCATENATED JPEG detected at offset %u - truncating here", read_pos);
+          ESP_LOGW(TAG, "  CONCATENATED JPEG detected at offset %u - truncating here", read_pos);
           ESP_LOGW(TAG, "  FFmpeg is sending multiple JPEGs glued together!");
         }
         // Add EOI marker to close first JPEG properly
@@ -786,7 +786,7 @@ size_t IPCameraViewer::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
         // CRITICAL: Validate SOF0 marker is not truncated
         if (read_pos + total_len > len) {
           if (debug_markers) {
-            ESP_LOGW(TAG, "  ⚠️ TRUNCATED SOF0 marker at offset %u (needs %u bytes, only %u available)",
+            ESP_LOGW(TAG, "  TRUNCATED SOF0 marker at offset %u (needs %u bytes, only %u available)",
                      read_pos, total_len, len - read_pos);
           }
           // JPEG is corrupted - reject entire frame
@@ -830,13 +830,13 @@ size_t IPCameraViewer::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
             uint8_t y_v = y_sampling & 0x0F;
 
             if (y_h == 2 && y_v == 2) {
-              ESP_LOGI(TAG, "    📊 Chroma subsampling: 4:2:0 (YUV420) ✅ Standard");
+              ESP_LOGI(TAG, "    Chroma subsampling: 4:2:0 (YUV420) Standard");
             } else if (y_h == 2 && y_v == 1) {
-              ESP_LOGW(TAG, "    📊 Chroma subsampling: 4:2:2 (YUV422) ⚠️ May not be supported");
+              ESP_LOGW(TAG, "    Chroma subsampling: 4:2:2 (YUV422) May not be supported");
             } else if (y_h == 1 && y_v == 1) {
-              ESP_LOGW(TAG, "    📊 Chroma subsampling: 4:4:4 (YUV444) ⚠️ May not be supported");
+              ESP_LOGW(TAG, "    Chroma subsampling: 4:4:4 (YUV444) May not be supported");
             } else {
-              ESP_LOGW(TAG, "    📊 Non-standard chroma subsampling: %ux%u ⚠️", y_h, y_v);
+              ESP_LOGW(TAG, "    Non-standard chroma subsampling: %ux%u", y_h, y_v);
             }
           }
         }
@@ -856,7 +856,7 @@ size_t IPCameraViewer::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
         // CRITICAL: Validate marker is not truncated
         if (read_pos + total_len > len) {
           if (debug_markers) {
-            ESP_LOGW(TAG, "  ⚠️ TRUNCATED %s marker at offset %u (needs %u bytes, only %u available)",
+            ESP_LOGW(TAG, "  TRUNCATED %s marker at offset %u (needs %u bytes, only %u available)",
                      marker == 0xDB ? "DQT" : "DHT", read_pos, total_len, len - read_pos);
           }
           // JPEG is corrupted - reject entire frame
@@ -906,7 +906,7 @@ size_t IPCameraViewer::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
   if (debug_markers && (sof_width != 0 || sof_height != 0)) {
     ESP_LOGI(TAG, "  JPEG resolution: %ux%u (configured: 640x480)", sof_width, sof_height);
     if (sof_width != 640 || sof_height != 480) {
-      ESP_LOGW(TAG, "  ⚠️ RESOLUTION MISMATCH! Decoder expects 640x480");
+      ESP_LOGW(TAG, "  RESOLUTION MISMATCH! Decoder expects 640x480");
     }
   }
 
@@ -1032,8 +1032,8 @@ bool IPCameraViewer::decode_jpeg_to_rgb565_() {
   // Log first successful decode only
   static bool first_success = false;
   if (!first_success) {
-    ESP_LOGI(TAG, "✅ JPEG decoder working! %ux%u resolution", this->width_, this->height_);
-    ESP_LOGI(TAG, "✅ First frame: %u bytes JPEG → %u bytes RGB565", this->jpeg_data_len_, out_size);
+    ESP_LOGI(TAG, "JPEG decoder working! %ux%u resolution", this->width_, this->height_);
+    ESP_LOGI(TAG, "First frame: %u bytes JPEG -> %u bytes RGB565", this->jpeg_data_len_, out_size);
     first_success = true;
   }
 
@@ -1515,7 +1515,7 @@ bool IPCameraViewer::fetch_rtp_frame_() {
           memcpy(this->h264_buffer_ + this->h264_data_len_, this->pps_cache_, this->pps_len_);
           this->h264_data_len_ += this->pps_len_;
 
-          ESP_LOGI(TAG, "✓ Sent SPS+PPS (%u+%u bytes) with FIRST frame (NAL type %u)",
+          ESP_LOGI(TAG, "Sent SPS+PPS (%u+%u bytes) with FIRST frame (NAL type %u)",
                    this->sps_len_, this->pps_len_, nal_type);
           this->param_sets_sent_ = true;
         }
@@ -1580,11 +1580,11 @@ bool IPCameraViewer::fetch_rtp_frame_() {
             // Add PPS
             memcpy(this->h264_buffer_ + this->h264_data_len_, this->pps_cache_, this->pps_len_);
             this->h264_data_len_ += this->pps_len_;
-            ESP_LOGI(TAG, "✓ Sent SPS+PPS (%u+%u bytes) with FIRST fragmented frame (FU type %u)",
+            ESP_LOGI(TAG, "Sent SPS+PPS (%u+%u bytes) with FIRST fragmented frame (FU type %u)",
                      this->sps_len_, this->pps_len_, fu_type);
             this->param_sets_sent_fua_ = true;
           } else {
-            ESP_LOGW(TAG, "⚠ Buffer too small to add SPS+PPS (need %u bytes, buffer has %u free)",
+            ESP_LOGW(TAG, "Buffer too small to add SPS+PPS (need %u bytes, buffer has %u free)",
                      this->sps_len_ + this->pps_len_ + nal_len + 3,
                      this->h264_buffer_size_ - this->h264_data_len_);
           }
@@ -1663,16 +1663,16 @@ bool IPCameraViewer::decode_h264_to_yuv_() {
                  ret, in_frame.raw_data.len, error_count);
 
         // Explain error code
-        if (ret == -1) ESP_LOGE(TAG, "  → ESP_H264_ERR_FAIL (general decode failure)");
-        if (ret == -2) ESP_LOGE(TAG, "  → ESP_H264_ERR_ARG (invalid arguments)");
-        if (ret == -3) ESP_LOGE(TAG, "  → ESP_H264_ERR_MEM (out of memory)");
-        if (ret == -5) ESP_LOGE(TAG, "  → ESP_H264_ERR_UNSUPPORTED (profile incompatible or feature not supported)");
-        if (ret == -6) ESP_LOGE(TAG, "  → ESP_H264_ERR_TIMEOUT");
-        if (ret == -7) ESP_LOGE(TAG, "  → ESP_H264_ERR_OVERFLOW");
+        if (ret == -1) ESP_LOGE(TAG, "  -> ESP_H264_ERR_FAIL (general decode failure)");
+        if (ret == -2) ESP_LOGE(TAG, "  -> ESP_H264_ERR_ARG (invalid arguments)");
+        if (ret == -3) ESP_LOGE(TAG, "  -> ESP_H264_ERR_MEM (out of memory)");
+        if (ret == -5) ESP_LOGE(TAG, "  -> ESP_H264_ERR_UNSUPPORTED (profile incompatible or feature not supported)");
+        if (ret == -6) ESP_LOGE(TAG, "  -> ESP_H264_ERR_TIMEOUT");
+        if (ret == -7) ESP_LOGE(TAG, "  -> ESP_H264_ERR_OVERFLOW");
 
         if (!first_decode_success) {
-          ESP_LOGE(TAG, "  ⚠ No frames decoded yet - check if SPS/PPS were sent with first frame");
-          ESP_LOGE(TAG, "  ⚠ If error = -5, H264 profile may be incompatible (High Profile not fully supported)");
+          ESP_LOGE(TAG, "  No frames decoded yet - check if SPS/PPS were sent with first frame");
+          ESP_LOGE(TAG, "  If error = -5, H264 profile may be incompatible (High Profile not fully supported)");
         }
       }
       break;
@@ -1690,7 +1690,7 @@ bool IPCameraViewer::decode_h264_to_yuv_() {
 
       // Log first successful decode
       if (!first_decode_success) {
-        ESP_LOGI(TAG, "✓ First frame decoded successfully! Decoder initialized and working.");
+        ESP_LOGI(TAG, "First frame decoded successfully! Decoder initialized and working.");
         ESP_LOGI(TAG, "  Decoded YUV size: %u bytes (expected: %u bytes)",
                  out_frame.out_size, this->yuv_buffer_size_);
         first_decode_success = true;
