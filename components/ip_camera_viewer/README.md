@@ -454,10 +454,12 @@ ffplay -rtsp_transport tcp rtsp://user:pass@192.168.1.56:554/stream2
 
 ## License
 
-The source code of this component is original work by youkorr. Because it is an
-ESPHome external component, it follows the **same dual-license arrangement as
-ESPHome** so the two can be combined and distributed without any license
-conflict:
+This component was created and is maintained solely by **youkorr**. It is the
+author's original work: it does not reuse or redistribute any ESPHome or
+Espressif source code, and only relies on their public APIs at build time.
+Because it is an ESPHome external component, it follows the **same dual-license
+arrangement as ESPHome** so the two can be combined and distributed without any
+license conflict:
 
 - **C++/runtime code** (`.c`, `.cpp`, `.h`, `.hpp`, `.tcc`, `.ino`) is licensed
   under the **GPLv3** (it is compiled and linked against ESPHome's GPLv3 C++
@@ -485,4 +487,5 @@ For problems or questions:
 
 ---
 
+**Author:** youkorr
 **Version:** 1.0.0

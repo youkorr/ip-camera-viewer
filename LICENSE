@@ -2,11 +2,12 @@
 
 Copyright (c) 2026 youkorr
 
-The source code of this IP Camera Viewer component was written originally by the
-authors of this repository (youkorr). It is an external component for the
-ESPHome project and is published under the same dual-license arrangement as
-ESPHome, so that the two can be combined and distributed without any license
-conflict.
+The source code of this IP Camera Viewer component is the original work of, and
+was created and is maintained solely by, youkorr. It is an independent ESPHome
+external component: it does not reuse or redistribute any ESPHome or Espressif
+source code, and only relies on their public APIs at build time. It is published
+under the same dual-license arrangement as ESPHome, so that the two can be
+combined and distributed without any license conflict.
 
 This license is made up of two base licenses: MIT and the GNU GENERAL PUBLIC
 LICENSE. The C++/runtime code of this component (file extensions .c, .cpp, .h,
