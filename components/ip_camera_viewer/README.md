@@ -488,12 +488,12 @@ ffplay -rtsp_transport tcp rtsp://user:pass@192.168.1.56:554/stream2
 
 ## License
 
-This component was created and is maintained solely by **youkorr**. It is the
-author's original work: it does not reuse or redistribute any ESPHome or
-Espressif source code, and only relies on their public APIs at build time.
-Because it is an ESPHome external component, it follows the **same dual-license
-arrangement as ESPHome** so the two can be combined and distributed without any
-license conflict:
+The `ip_camera_viewer` component (everything under `components/ip_camera_viewer`)
+was created and is maintained solely by **youkorr**. It is the author's original
+work and does not reuse any ESPHome or Espressif source code. Because it is an
+ESPHome external component, it follows the **same dual-license arrangement as
+ESPHome** so the two can be combined and distributed without any license
+conflict:
 
 - **C++/runtime code** (`.c`, `.cpp`, `.h`, `.hpp`, `.tcc`, `.ino`) is licensed
   under the **GPLv3** (it is compiled and linked against ESPHome's GPLv3 C++
@@ -501,16 +501,19 @@ license conflict:
 - **Python code and all other parts** of this repository are licensed under the
   **MIT** license.
 
-See the [LICENSE](LICENSE) file for the full text of both licenses.
+See the [LICENSE](LICENSE) file for the full text of both licenses. This applies
+only to the `ip_camera_viewer` component; bundled third-party code keeps its own
+license (see below).
 
 ### Third-party acknowledgements
 
 - **ESPHome** (https://github.com/esphome/esphome) — Copyright (c) 2019 ESPHome,
   dual-licensed MIT/GPLv3.
-- **Espressif ESP-IDF** components (ESP32-P4 hardware JPEG decoder, `esp_h264`
-  decoder, etc.) — Copyright (c) Espressif Systems, licensed under their own
-  terms (predominantly Apache-2.0). No Espressif source code is redistributed in
-  this repository; only its public APIs are used at build time.
+- **Espressif `esp_h264`** (bundled under `components/esp_h264`) — Copyright (c)
+  Espressif Systems, licensed under **Apache-2.0**. It is included unmodified as
+  a build dependency (software H.264 / RTSP decoding) so the project compiles out
+  of the box, and keeps its own SPDX headers and `LICENSE`/`NOTICE` files. The
+  ESP32-P4 hardware JPEG decoder is used through ESP-IDF's public APIs.
 
 ## Support
 
