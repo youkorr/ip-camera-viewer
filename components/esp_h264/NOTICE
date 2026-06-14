@@ -1,0 +1,16 @@
+esp_h264
+========
+
+This directory contains the Espressif "esp_h264" component (the ESP H.264
+encoder/decoder), vendored from https://github.com/espressif/esp-video.
+
+Copyright (c) 2024 Espressif Systems (Shanghai) CO LTD
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+these files except in compliance with the License. A copy of the License is
+provided in the LICENSE file in this directory, and per-file SPDX headers
+(SPDX-License-Identifier: Apache-2.0) are retained in the source files.
+
+This code is included here unmodified as a build dependency of the
+ip_camera_viewer component (used for software H.264 / RTSP decoding). It is the
+property of Espressif Systems and is governed solely by its own Apache-2.0
+license, independently of the license of the ip_camera_viewer component itself.

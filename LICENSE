@@ -2,12 +2,17 @@
 
 Copyright (c) 2026 youkorr
 
-The source code of this IP Camera Viewer component is the original work of, and
-was created and is maintained solely by, youkorr. It is an independent ESPHome
-external component: it does not reuse or redistribute any ESPHome or Espressif
-source code, and only relies on their public APIs at build time. It is published
-under the same dual-license arrangement as ESPHome, so that the two can be
-combined and distributed without any license conflict.
+The source code of this IP Camera Viewer component (everything under
+components/ip_camera_viewer) is the original work of, and was created and is
+maintained solely by, youkorr. It does not reuse any ESPHome or Espressif source
+code. It is published under the same dual-license arrangement as ESPHome, so that
+the two can be combined and distributed without any license conflict.
+
+This repository also bundles, as a build dependency, the Espressif "esp_h264"
+component (under components/esp_h264), which is third-party code licensed under
+the Apache License 2.0 and remains the property of Espressif Systems. It is NOT
+covered by the licenses below; see components/esp_h264/LICENSE and
+components/esp_h264/NOTICE for its terms.
 
 This license is made up of two base licenses: MIT and the GNU GENERAL PUBLIC
 LICENSE. The C++/runtime code of this component (file extensions .c, .cpp, .h,
@@ -22,13 +27,15 @@ Both the MIT and GPLv3 licenses are attached to this document.
   Copyright (c) 2019 ESPHome, dual-licensed under MIT/GPLv3. The C++ code of
   this component includes ESPHome headers and is linked against ESPHome's
   GPLv3 C++ runtime; this is why the C++ part of this component is GPLv3.
-- This component relies on Espressif ESP-IDF components (for example the
-  ESP32-P4 hardware JPEG decoder and the esp_h264 decoder),
-  Copyright (c) Espressif Systems (Shanghai) Co., Ltd., which are licensed by
-  Espressif under their own terms (predominantly Apache License 2.0). No
-  Espressif source code is redistributed in this repository; only its public
-  APIs are used at build time. Each dependency remains the property of its
-  respective copyright holders and is governed by its own license.
+- This component relies on Espressif ESP-IDF components,
+  Copyright (c) Espressif Systems (Shanghai) Co., Ltd., licensed under their own
+  terms (predominantly Apache License 2.0). The ESP32-P4 hardware JPEG decoder is
+  used through ESP-IDF's public APIs at build time. The Espressif "esp_h264"
+  component is bundled in this repository under components/esp_h264 (Apache-2.0,
+  unmodified) so the project compiles out of the box; it retains its own
+  per-file SPDX headers and its LICENSE/NOTICE files. Each dependency remains the
+  property of its respective copyright holders and is governed by its own
+  license.
 
 ## MIT License
 
