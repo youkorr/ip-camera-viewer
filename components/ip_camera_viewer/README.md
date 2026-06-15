@@ -364,6 +364,54 @@ ESP32-P4 hardware JPEG decoder — fast and reliable), or have go2rtc/ffmpeg
 
 **Recommendation:** Use MJPEG via go2rtc for better performance!
 
+### Reolink / Tapo / any Main-or-High profile camera: stream as MJPEG
+
+Most IP cameras (Reolink CX810, Tapo, Hikvision, ...) only output **H264
+Main/High profile**, which the ESP32-P4 cannot decode. These cameras **do not
+offer MJPEG natively** — you create an MJPEG stream by transcoding with
+**go2rtc + ffmpeg**, then point this component at go2rtc.
+
+**Why:** the ESP32-P4 has a hardware **JPEG** decoder but no H264 decoder (the
+software H264 decoder is Baseline-only). MJPEG is a stream of JPEG frames, so it
+is decoded in hardware — smooth and reliable. go2rtc/ffmpeg does the H264 -> JPEG
+conversion.
+
+**Requirement:** go2rtc must have **ffmpeg** available. The `alexxit/go2rtc`
+Docker image, the Home Assistant go2rtc add-on, and Frigate all bundle ffmpeg. A
+bare go2rtc binary needs ffmpeg installed separately.
+
+**1. go2rtc.yaml** (example for a Reolink sub-stream):
+
+```yaml
+streams:
+  reolink_sub:
+    - rtsp://USER:PASSWORD@192.168.1.137:554/h264Preview_01_sub
+```
+
+**2. Verify** in a browser — this URL is transcoded to MJPEG on demand:
+
+```
+http://GO2RTC_IP:1984/api/stream.mjpeg?src=reolink_sub
+```
+
+**3. ESPHome** — point at that MJPEG URL, matching the stream resolution
+(the Reolink "Fluent" sub-stream is 640x360):
+
+```yaml
+ip_camera_viewer:
+  - id: security_cam_1
+    url: "http://GO2RTC_IP:1984/api/stream.mjpeg?src=reolink_sub"
+    protocol: mjpeg
+    width: 640
+    height: 360
+    canvas_id: security_canvas
+    update_interval: 100ms
+```
+
+Tip: keep the sub-stream (low resolution / fps) for the ESP32-P4 — it is lighter
+to transcode and to display.
+
+
 ## Multi-camera configuration
 
 ```yaml
