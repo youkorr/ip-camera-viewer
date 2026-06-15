@@ -1058,9 +1058,13 @@ bool IPCameraViewer::connect_rtsp_stream_() {
 
   url = url.substr(7);  // Remove "rtsp://"
 
-  // Check for credentials (user:pass@)
+  // Check for credentials (user:pass@). The credentials live in the userinfo
+  // section, before the first '/', and the password itself may contain '@', so
+  // split on the LAST '@' within the authority (not the first one).
   std::string credentials;
-  size_t at_pos = url.find('@');
+  size_t authority_end = url.find('/');
+  std::string authority = (authority_end == std::string::npos) ? url : url.substr(0, authority_end);
+  size_t at_pos = authority.rfind('@');
   if (at_pos != std::string::npos) {
     credentials = url.substr(0, at_pos);
     url = url.substr(at_pos + 1);  // Remove credentials from URL
