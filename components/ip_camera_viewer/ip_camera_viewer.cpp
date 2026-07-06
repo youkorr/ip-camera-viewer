@@ -1661,6 +1661,10 @@ bool IPCameraViewer::connect_rtsp_stream_() {
     control_url = full_url;
   }
 
+  // Mémoriser l'URL de contrôle : elle sert d'URI aux keepalives GET_PARAMETER
+  // envoyés pendant le streaming (voir send_rtsp_keepalive_).
+  this->rtsp_control_url_ = control_url;
+
   // SETUP with TCP interleaved transport
   if (!this->send_rtsp_request_("SETUP", control_url, "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n")) {
     this->disconnect_rtsp_stream_();
@@ -1680,6 +1684,9 @@ bool IPCameraViewer::connect_rtsp_stream_() {
   fcntl(this->rtsp_socket_, F_SETFL, flags | O_NONBLOCK);
 
   this->stream_connected_ = true;
+  // Armer le keepalive : premier "ping" ~15 s après le PLAY (bien avant les ~30 s
+  // d'inactivité qui font expirer la session côté caméra).
+  this->last_keepalive_ = millis();
   ESP_LOGI(TAG, "RTSP stream connected (TCP interleaved)");
 
   return true;
@@ -1906,6 +1913,29 @@ bool IPCameraViewer::send_rtsp_request_(const std::string &method, const std::st
   return true;
 }
 
+void IPCameraViewer::send_rtsp_keepalive_() {
+  if (this->rtsp_socket_ < 0 || this->rtsp_session_.empty())
+    return;
+
+  // GET_PARAMETER (avec corps vide) = "ping" de keepalive RTSP standard : garde
+  // la session ouverte sans effet sur le flux. On ENVOIE seulement : la réponse
+  // RTSP ("RTSP/1.0 200 OK...") arrive entrelacée aux paquets '$' sur ce socket
+  // et sera jetée octet par octet par la resync-vers-'$' de fetch_rtp_frame_. Ne
+  // JAMAIS lire ici : un recv() avalerait une partie d'un paquet RTP et
+  // désyncerait le framing interleaved (plus aucune frame ne s'assemblerait).
+  const std::string &uri = this->rtsp_control_url_.empty() ? this->url_ : this->rtsp_control_url_;
+  std::string auth_header = this->build_rtsp_auth_header_("GET_PARAMETER", uri);
+  std::string request = "GET_PARAMETER " + uri + " RTSP/1.0\r\n" +
+                        "CSeq: " + std::to_string(this->cseq_++) + "\r\n" +
+                        "Session: " + this->rtsp_session_ + "\r\n" +
+                        auth_header + "\r\n";
+  ssize_t sent = send(this->rtsp_socket_, request.data(), request.size(), 0);
+  if (sent < 0)
+    ESP_LOGW(TAG, "RTSP keepalive send failed (errno=%d)", errno);
+  else
+    ESP_LOGD(TAG, "RTSP keepalive sent (GET_PARAMETER)");
+}
+
 bool IPCameraViewer::fetch_rtp_frame_() {
   if (this->rtsp_socket_ < 0) {
     return false;
@@ -1915,6 +1945,19 @@ bool IPCameraViewer::fetch_rtp_frame_() {
   // $ (0x24), channel (1 byte), length (2 bytes big endian), RTP data
   // Packets are extracted from the persistent rtp_acc_ buffer (see below).
   uint8_t rtp_packet[1500];
+
+  // --- Keepalive RTSP -------------------------------------------------------
+  // La caméra ferme une session RTSP restée inactive côté contrôle (~30 s sur
+  // Reolink) ; le socket TCP reste alors ouvert mais plus AUCUN paquet '$'
+  // n'arrive (symptôme observé : eagain permanent, pkts figés au bout de ~30 s).
+  // On envoie un GET_PARAMETER toutes les 15 s sur ce même socket pour tenir la
+  // session ouverte. Exécuté ici (thread de la tâche de décodage qui possède le
+  // socket) : aucun accès concurrent au socket ni au CSeq.
+  uint32_t now_ka = millis();
+  if (now_ka - this->last_keepalive_ >= 15000) {
+    this->last_keepalive_ = now_ka;
+    this->send_rtsp_keepalive_();
+  }
 
   // --- Régulateur de latence (voir ip_camera_viewer.h) ----------------------
   // Si le socket reste saturé plusieurs contrôles de suite, le décodage est en

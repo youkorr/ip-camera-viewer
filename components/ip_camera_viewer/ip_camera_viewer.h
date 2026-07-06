@@ -172,6 +172,14 @@ class IPCameraViewer : public Component {
   int rtp_socket_{-1};
   uint16_t rtp_port_{0};
   std::string rtsp_session_{};
+  // URL de contrôle du média vidéo (issue du SDP), mémorisée pour l'URI des
+  // requêtes de keepalive périodiques (GET_PARAMETER) pendant le streaming.
+  std::string rtsp_control_url_{};
+  // Dernier keepalive RTSP envoyé (millis). La caméra ferme une session inactive
+  // (~30 s sur Reolink) : sans "ping" périodique, le flux s'arrête au bout de ~30 s
+  // même si le socket TCP reste ouvert (symptôme : eagain permanent, 0 nouveau
+  // paquet). On envoie un GET_PARAMETER toutes les 15 s pour garder la session.
+  uint32_t last_keepalive_{0};
   std::string rtsp_auth_{};  // Base64 encoded credentials (Basic auth)
   std::string rtsp_user_{};  // Username (for Digest auth)
   std::string rtsp_pass_{};  // Password (for Digest auth)
@@ -253,6 +261,10 @@ class IPCameraViewer : public Component {
   void disconnect_rtsp_stream_();
   bool init_h264_decoder_();
   bool send_rtsp_request_(const std::string &method, const std::string &url, const std::string &extra_headers = "", std::string *response_body = nullptr);
+  // Keepalive "fire-and-forget" : envoie un GET_PARAMETER sur le socket RTSP sans
+  // lire la réponse (elle arrive entrelacée aux paquets '$' et est jetée par la
+  // resync du lecteur RTP). Empêche l'expiration de la session pendant le stream.
+  void send_rtsp_keepalive_();
   std::string build_rtsp_auth_header_(const std::string &method, const std::string &uri);  // Basic or Digest
   bool parse_rtsp_response_(std::string &response);
   bool fetch_rtp_frame_();
