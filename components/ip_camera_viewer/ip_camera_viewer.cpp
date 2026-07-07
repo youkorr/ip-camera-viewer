@@ -83,6 +83,18 @@ void IPCameraViewer::setup() {
       ESP_LOGW(TAG, "Dedicated decode task NOT created (out of internal RAM?) — falling back "
                     "to inline decoding (LVGL may freeze during I-frames). Free internal RAM "
                     "(e.g. remove micro_wake_word) to enable it.");
+      // The inline fallback in loop() never calls the PPA (it only runs the
+      // scalar YUV->RGB565 conversion at native width_/height_) — without the
+      // dedicated task, display resize never actually happens. Disable it so
+      // render_width_()/height_() (used by update_canvas_) match what the
+      // inline path really produces, instead of reporting a stride the
+      // buffer's content doesn't have.
+      if (this->resizing_()) {
+        ESP_LOGW(TAG, "Disabling display resize (no dedicated decode task -> PPA unused) — "
+                      "reverting to native %ux%u.", this->width_, this->height_);
+        this->display_width_ = 0;
+        this->display_height_ = 0;
+      }
     } else {
       ESP_LOGI(TAG, "Dedicated H.264 decode task running — LVGL will no longer freeze.");
     }
@@ -513,12 +525,17 @@ bool IPCameraViewer::ppa_convert_(uint8_t *dst_rgb565) {
   op.in.yuv_std = PPA_COLOR_CONV_STD_RGB_YUV_BT601;
   op.out.buffer = dst_rgb565;
   op.out.buffer_size = this->rgb565_buffer_size_;
-  op.out.pic_w = this->width_;
-  op.out.pic_h = this->height_;
+  op.out.pic_w = this->render_width_();
+  op.out.pic_h = this->render_height_();
   op.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
   op.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
-  op.scale_x = 1.0f;
-  op.scale_y = 1.0f;
+  // 1.0f when no display_width_/height_ was configured (render_*() falls back
+  // to width_/height_) -> byte-for-byte the previous no-resize behavior.
+  // Otherwise the PPA stretches EXACTLY to render_width_/height_ in the same
+  // hardware pass as the color conversion: no separate resize step, and no
+  // aspect-ratio correction — the caller picked these dimensions on purpose.
+  op.scale_x = (float) this->render_width_() / (float) this->width_;
+  op.scale_y = (float) this->render_height_() / (float) this->height_;
   op.mode = PPA_TRANS_MODE_BLOCKING;  // le DMA travaille, la tâche dort
   esp_err_t err = ppa_do_scale_rotate_mirror((ppa_client_handle_t) this->ppa_client_, &op);
   if (err != ESP_OK) {
@@ -526,6 +543,18 @@ bool IPCameraViewer::ppa_convert_(uint8_t *dst_rgb565) {
     ESP_LOGW(TAG, "PPA SRM operation failed (%s) — falling back to software conversion.",
              esp_err_to_name(err));
     this->ppa_ok_ = false;
+    // The scalar fallback (convert_yuv420_to_rgb565_) always writes at native
+    // width_/height_ with a matching stride — it cannot target a differently
+    // sized buffer. Turn resizing off from here on so render_width_()/height_()
+    // (used by update_canvas_) go back to matching what the fallback actually
+    // produces; without this the canvas would report the old, larger stride
+    // and read the smaller native image as garbage.
+    if (this->resizing_()) {
+      ESP_LOGW(TAG, "Disabling display resize (PPA failed at runtime) — reverting to "
+                    "native %ux%u.", this->width_, this->height_);
+      this->display_width_ = 0;
+      this->display_height_ = 0;
+    }
     return false;
   }
   return true;
@@ -538,11 +567,17 @@ bool IPCameraViewer::ppa_convert_(uint8_t *dst_rgb565) {
 bool IPCameraViewer::init_buffers_() {
   // ESP32-P4 JPEG decoder requires dimensions to be 16-byte aligned
   // Round up to nearest multiple of 16
-  uint32_t aligned_width = (this->width_ + 15) & ~15;
-  uint32_t aligned_height = (this->height_ + 15) & ~15;
+  // RGB565/canvas buffers are sized on the RENDER resolution (render_width_/
+  // height_), which equals width_/height_ unless display_width_/height_ was
+  // configured (RTSP/H264 only — see set_display_size()). The MJPEG path is
+  // never resized: render_width_()/height_() fall back to width_/height_ since
+  // display_width_ stays 0 there (enforced in the Python config validator).
+  uint32_t aligned_width = (this->render_width_() + 15) & ~15;
+  uint32_t aligned_height = (this->render_height_() + 15) & ~15;
 
-  ESP_LOGI(TAG, "Image dimensions: %ux%u (configured) -> %ux%u (16-byte aligned)",
-           this->width_, this->height_, aligned_width, aligned_height);
+  ESP_LOGI(TAG, "Image dimensions: %ux%u (stream) -> %ux%u render -> %ux%u (16-byte aligned)",
+           this->width_, this->height_, this->render_width_(), this->render_height_(),
+           aligned_width, aligned_height);
 
   // RGB565 buffer size: aligned_width * aligned_height * 2 bytes, arrondi à 128
   // (le PPA exige des buffers de sortie alignés/dimensionnés sur la ligne de
@@ -658,6 +693,21 @@ bool IPCameraViewer::init_buffers_() {
     this->init_ppa_();
     if (this->ouyy_buffer_ == nullptr)
       this->ppa_ok_ = false;
+
+    // display_width_/height_ (resize) relies entirely on the PPA doing the
+    // stretch; the scalar fallback conversion always writes at native
+    // width_/height_ with a matching stride and cannot safely target a
+    // differently-sized buffer. If the PPA isn't available, degrade to no
+    // resize rather than corrupt the canvas: the RGB565 buffers were already
+    // sized for the larger render resolution above, so this just leaves
+    // their tail unused (harmless) while render_width_()/height_() now fall
+    // back to width_/height_ everywhere (canvas, PPA — unused here anyway).
+    if (this->resizing_() && !this->ppa_ok_) {
+      ESP_LOGW(TAG, "display_width_/height_ requested but the PPA is unavailable — "
+                    "falling back to native %ux%u (no resize).", this->width_, this->height_);
+      this->display_width_ = 0;
+      this->display_height_ = 0;
+    }
   }
 
   ESP_LOGI(TAG, "Buffers allocated successfully");
@@ -2394,8 +2444,11 @@ bool IPCameraViewer::decode_h264_to_yuv_() {
       }
       this->yuv_is_ouyy_ = false;
       if (sw > 0 && sh > 0 && f.y && f.cb && f.cr) {
-        // Le canvas LVGL et convert_yuv420_to_rgb565_ sont FIXÉS à width_/height_
-        // (config YAML). On dispose donc l'image décodée dans un plan I420 à la
+        // yuv_buffer_ et convert_yuv420_to_rgb565_ sont FIXÉS à width_/height_ (la
+        // résolution du FLUX, config YAML) — le canvas, lui, peut être plus grand
+        // si display_width_/height_ est configuré (voir render_width_()), mais ce
+        // redimensionnement est une étape SÉPARÉE et ultérieure (PPA), qui ne
+        // change rien ici. On dispose donc l'image décodée dans un plan I420 à la
         // taille CONFIGURÉE : on recadre (crop) si le flux est plus grand, on
         // letterbox (bords noirs) s'il est plus petit. Conséquence : un mismatch
         // de résolution donne TOUJOURS une image (jamais d'écran noir) et ne peut
@@ -2573,7 +2626,7 @@ void IPCameraViewer::update_canvas_() {
   }
 
   lv_canvas_set_buffer(this->canvas_obj_, this->current_decode_buffer_,
-                       this->width_, this->height_, LV_COLOR_FORMAT_RGB565);
+                       this->render_width_(), this->render_height_(), LV_COLOR_FORMAT_RGB565);
   lv_obj_invalidate(this->canvas_obj_);
 }
 
@@ -2592,7 +2645,11 @@ void IPCameraViewer::dump_config() {
   ESP_LOGCONFIG(TAG, "IP Camera Viewer:");
   ESP_LOGCONFIG(TAG, "  URL: %s", this->url_.c_str());
   ESP_LOGCONFIG(TAG, "  Protocol: %s", this->protocol_ == Protocol::RTSP ? "RTSP/H264" : "MJPEG");
-  ESP_LOGCONFIG(TAG, "  Resolution: %ux%u", this->width_, this->height_);
+  ESP_LOGCONFIG(TAG, "  Stream resolution: %ux%u", this->width_, this->height_);
+  if (this->resizing_()) {
+    ESP_LOGCONFIG(TAG, "  Display resolution: %ux%u (PPA resize)", this->display_width_,
+                  this->display_height_);
+  }
   ESP_LOGCONFIG(TAG, "  Update interval: %u ms", this->update_interval_);
 }
 

@@ -42,6 +42,11 @@ class IPCameraViewer : public Component {
   void set_url(const std::string &url) { this->url_ = url; }
   void set_width(uint16_t width) { this->width_ = width; }
   void set_height(uint16_t height) { this->height_ = height; }
+  // Taille d'affichage/canvas optionnelle, si différente de la résolution du
+  // flux décodé (width_/height_). Étirée EXACTEMENT vers ces dimensions par le
+  // PPA matériel (voir ppa_convert_) — pas de préservation automatique du ratio,
+  // l'appelant choisit des dimensions cohérentes avec son écran/flux.
+  void set_display_size(uint16_t w, uint16_t h) { this->display_width_ = w; this->display_height_ = h; }
   void set_update_interval(uint32_t interval_ms) { this->update_interval_ = interval_ms; }
   void set_enabled(bool enabled) { this->enabled_ = enabled; }
   void set_protocol(const std::string &protocol) {
@@ -64,6 +69,13 @@ class IPCameraViewer : public Component {
   std::string url_{};
   uint16_t width_{640};
   uint16_t height_{480};
+  // 0 = pas de redimensionnement demandé (rendu à width_/height_). Utiliser
+  // render_width_()/render_height_() plutôt que ces champs directement.
+  uint16_t display_width_{0};
+  uint16_t display_height_{0};
+  uint16_t render_width_() const { return this->display_width_ ? this->display_width_ : this->width_; }
+  uint16_t render_height_() const { return this->display_height_ ? this->display_height_ : this->height_; }
+  bool resizing_() const { return this->display_width_ != 0; }
   Protocol protocol_{Protocol::MJPEG};
 
   lv_obj_t *canvas_obj_{nullptr};

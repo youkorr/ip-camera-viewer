@@ -14,6 +14,8 @@ CONF_CANVAS_ID = "canvas_id"
 CONF_UPDATE_INTERVAL = "update_interval"
 CONF_WIDTH = "width"
 CONF_HEIGHT = "height"
+CONF_DISPLAY_WIDTH = "display_width"
+CONF_DISPLAY_HEIGHT = "display_height"
 CONF_PROTOCOL = "protocol"
 
 ip_camera_viewer_ns = cg.esphome_ns.namespace("ip_camera_viewer")
@@ -34,6 +36,17 @@ def _validate_url_protocol(config):
             "An 'http(s)://' URL is not valid with 'protocol: rtsp/h264'. "
             "Use 'protocol: mjpeg' for http MJPEG streams, or an 'rtsp://' URL for RTSP."
         )
+    if (CONF_DISPLAY_WIDTH in config) != (CONF_DISPLAY_HEIGHT in config):
+        raise cv.Invalid(
+            "'display_width' and 'display_height' must be set together (or neither, "
+            "to display at the stream's native width/height)."
+        )
+    if CONF_DISPLAY_WIDTH in config and proto == "mjpeg":
+        raise cv.Invalid(
+            "'display_width'/'display_height' need the ESP32-P4 PPA path, only wired "
+            "for protocol: rtsp/h264. The MJPEG path is decoded directly at native "
+            "size by the hardware JPEG decoder."
+        )
     return config
 
 
@@ -44,6 +57,16 @@ IP_CAMERA_VIEWER_SCHEMA = cv.All(cv.Schema({
     cv.Required(CONF_CANVAS_ID): cv.string,
     cv.Required(CONF_WIDTH): cv.int_range(min=16, max=1920),
     cv.Required(CONF_HEIGHT): cv.int_range(min=16, max=1080),
+    # Optionnel : taille d'affichage/canvas si différente de width/height (la
+    # résolution du FLUX décodé). Utile quand le flux caméra (souvent bas, ex.
+    # 640x360 pour un sous-flux Reolink/Tapo) doit remplir un écran plus grand
+    # (Waveshare/Guition, résolutions variées selon le projet). Agrandi par le
+    # PPA matériel du P4 dans la même passe que la conversion YUV->RGB565 (quasi
+    # gratuit). Étire EXACTEMENT vers ces dimensions : à l'utilisateur de choisir
+    # un ratio cohérent avec son écran/flux si l'aspect doit être préservé — le
+    # composant ne déforme pas "pour vous", il fait ce qui est demandé.
+    cv.Optional(CONF_DISPLAY_WIDTH): cv.int_range(min=16, max=1920),
+    cv.Optional(CONF_DISPLAY_HEIGHT): cv.int_range(min=16, max=1080),
     cv.Optional(CONF_PROTOCOL, default="mjpeg"): cv.one_of("mjpeg", "rtsp", "h264", lower=True),
     cv.Optional(CONF_UPDATE_INTERVAL, default="100ms"): cv.positive_time_period_milliseconds,
 }).extend(cv.COMPONENT_SCHEMA), _validate_url_protocol)
@@ -77,6 +100,8 @@ async def to_code(config):
         cg.add(var.set_url(cam_config[CONF_URL]))
         cg.add(var.set_width(cam_config[CONF_WIDTH]))
         cg.add(var.set_height(cam_config[CONF_HEIGHT]))
+        if CONF_DISPLAY_WIDTH in cam_config:
+            cg.add(var.set_display_size(cam_config[CONF_DISPLAY_WIDTH], cam_config[CONF_DISPLAY_HEIGHT]))
         cg.add(var.set_protocol(cam_config[CONF_PROTOCOL]))
 
         update_interval_ms = cam_config[CONF_UPDATE_INTERVAL].total_milliseconds

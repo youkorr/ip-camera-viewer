@@ -330,6 +330,43 @@ ip_camera_viewer:
 > **Protocol values:** use `mjpeg` (HTTP MJPEG) or `rtsp` (RTSP/H.264). `h264`
 > is accepted as an alias for `rtsp`.
 
+### Display resize (`display_width` / `display_height`)
+
+Many cameras' RTSP sub-streams are low resolution (e.g. 640x360 for a Reolink
+or Tapo sub-stream), too small to fill a larger screen (Waveshare, Guition,
+...). `display_width`/`display_height` let the canvas be bigger than the
+decoded stream — the ESP32-P4's PPA (hardware Scale-Rotate-Mirror engine)
+stretches the image to that size in the same hardware pass as the
+YUV→RGB565 color conversion, so it costs virtually nothing extra:
+
+```yaml
+ip_camera_viewer:
+  - id: security_cam_1
+    url: "rtsp://username:password@192.168.1.56:554/h264Preview_01_sub"
+    protocol: rtsp
+    width: 640          # the STREAM's actual resolution
+    height: 360
+    display_width: 960  # optional: canvas/display resolution
+    display_height: 720
+    canvas_id: security_canvas
+```
+
+Notes:
+- Both `display_width` and `display_height` must be given together, or
+  omitted entirely (canvas defaults to `width`x`height`, no resize).
+- The stretch is **exact** — no automatic aspect-ratio preservation. If
+  `display_width`x`display_height` isn't the same aspect ratio as
+  `width`x`height`, the image will be stretched non-uniformly. Pick
+  dimensions matching your screen/stream on purpose (this is intentional:
+  the right choice depends on your display, e.g. Waveshare vs Guition boards
+  have different native resolutions).
+- Only available for `protocol: rtsp`/`h264` (needs the PPA path). Not
+  wired for MJPEG, which is already decoded at native resolution by the
+  hardware JPEG decoder.
+- If the PPA isn't available (init failure, or a runtime SRM error), the
+  component logs a warning and falls back to displaying at the stream's
+  native resolution rather than risking a corrupted canvas.
+
 ### RTSP authentication
 
 Credentials are taken from the URL (`rtsp://user:pass@host:port/path`). Both
