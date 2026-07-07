@@ -282,6 +282,49 @@ on_click:
         id(security_cam_1).set_enabled(true);
 ```
 
+### Problem 6: Screen flicker / strobing on the camera canvas
+
+**Symptom:**
+The camera image visibly flickers or strobes (alternates between the current
+frame and a stale/older one) while streaming, even though frames are decoding
+correctly and at a stable rate. Other, static LVGL widgets on the same page do
+not flicker.
+
+**Cause:**
+This is not a bug in `ip_camera_viewer` — it's a well-known LVGL interaction
+with **double-buffered** display drivers (this includes `mipi_dsi` on the
+ESP32-P4, and `rgb`/parallel RGB panels in general, which typically allocate
+two hardware framebuffers for tear-free DMA output). By default, LVGL only
+redraws the area it was told is "dirty" (here, just the canvas). With two
+framebuffers alternating each refresh, redrawing only one of them means the
+panel keeps swapping between "new frame" and "previous frame" every other
+refresh — visible as a flicker, and it gets worse the more of the screen the
+canvas covers.
+
+**Solution:**
+Add `full_refresh: true` to your `lvgl:` config. This makes LVGL redraw the
+entire screen every refresh instead of just the dirty area, so both
+framebuffers stay in sync:
+
+```yaml
+lvgl:
+  full_refresh: true
+  displays:
+    - tab5_display
+  pages:
+    - id: main_page
+      widgets:
+        - canvas:
+            id: cam_canvas
+            width: 640
+            height: 480
+```
+
+This costs a bit more CPU/DMA bandwidth per refresh (the whole screen is
+redrawn instead of just the canvas), but on ESP32-P4 this is not noticeable
+in practice and is the standard fix for any double-buffered display used with
+LVGL — not specific to this component.
+
 ## Success logs
 
 ### Working MJPEG
