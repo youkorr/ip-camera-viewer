@@ -145,7 +145,9 @@ void IPCameraViewer::decode_task_fn_(void *arg) {
         static uint32_t cv_n = 0;
         cv_acc += esp_timer_get_time() - _cv0;
         if (++cv_n == 64) {
-          ESP_LOGI(TAG, "YUV->RGB565 conversion: %lld ms/frame (64-frame average%s)",
+          // DEBUG, not INFO: this fires every ~64 frames (a few times a minute
+          // at streaming rate) and the UART logger itself costs CPU time.
+          ESP_LOGD(TAG, "YUV->RGB565 conversion: %lld ms/frame (64-frame average%s)",
                    (long long) (cv_acc / 64000),
                    (cam->yuv_is_ouyy_ && cam->ppa_ok_) ? ", PPA" : ", CPU");
           cv_acc = 0;
@@ -2091,20 +2093,22 @@ bool IPCameraViewer::fetch_rtp_frame_() {
     } else if (nal_type >= 1 && nal_type <= 23) {
       // Picture NAL unit (I-frame, P-frame, etc.)
 
-      // Rattrapage de latence : P-frames drainées sans décodage jusqu'à une IDR.
+      // Latency catch-up: P-frames are drained without decoding until an IDR.
       if (this->catchup_skip_to_idr_) {
         if (nal_type == 5) {
           this->catchup_skip_to_idr_ = false;
-          // Backlog encore important ? On décode cette IDR (image fraîche) mais on
-          // se ré-arme en 0,5 s (au lieu de 2 s) pour sauter le gros du GOP suivant.
-          // Sans ça, reprendre le décodage COMPLET dès la première IDR re-dérivait
-          // aussitôt et la latence plafonnait à ~30-60 s au lieu de converger.
+          // Still backlogged? Decode this IDR (fresh picture) but re-arm in
+          // 0.5 s (instead of 2 s) to skip most of the next GOP too. Without
+          // this, resuming FULL decoding at the first IDR fell behind again
+          // immediately and latency plateaued at ~30-60 s instead of
+          // converging.
           int pend = 0;
           if (ioctl(this->rtsp_socket_, FIONREAD, &pend) < 0)
             pend = 0;
           if ((size_t) pend + this->rtp_acc_len_ > 4096) {
             this->catchup_full_ticks_ = 3;
-            ESP_LOGI(TAG, "IDR decoded but still behind (%d bytes pending) — catch-up kept "
+            // DEBUG: can repeat every GOP while the backlog persists.
+            ESP_LOGD(TAG, "IDR decoded but still behind (%d bytes pending) — catch-up kept "
                           "active.", pend);
           } else {
             this->catchup_full_ticks_ = 0;
@@ -2218,18 +2222,19 @@ bool IPCameraViewer::fetch_rtp_frame_() {
       bool start = (fu_header >> 7) & 0x01;
       uint8_t fu_type = fu_header & 0x1F;
 
-      // Rattrapage de latence : fragments jetés jusqu'au début d'une IDR (FU type 5).
+      // Latency catch-up: fragments are dropped until an IDR start (FU type 5).
       if (this->catchup_skip_to_idr_) {
         if (start && fu_type == 5) {
           this->catchup_skip_to_idr_ = false;
-          // Voir le chemin NAL simple : IDR décodée, mais si le backlog persiste on
-          // se ré-arme en 0,5 s pour continuer à sauter les P du GOP suivant.
+          // See the single-NAL path above: IDR decoded, but re-arm in 0.5 s
+          // if the backlog persists, to keep skipping P-frames of the next GOP.
           int pend = 0;
           if (ioctl(this->rtsp_socket_, FIONREAD, &pend) < 0)
             pend = 0;
           if ((size_t) pend + this->rtp_acc_len_ > 4096) {
             this->catchup_full_ticks_ = 3;
-            ESP_LOGI(TAG, "IDR decoded but still behind (%d bytes pending) — catch-up kept "
+            // DEBUG: can repeat every GOP while the backlog persists.
+            ESP_LOGD(TAG, "IDR decoded but still behind (%d bytes pending) — catch-up kept "
                           "active.", pend);
           } else {
             this->catchup_full_ticks_ = 0;
