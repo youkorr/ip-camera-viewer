@@ -148,6 +148,27 @@ void IPCameraViewer::decode_task_fn_(void *arg) {
         bool converted;
         if (cam->yuv_is_ouyy_ && cam->ppa_ok_) {
           converted = cam->ppa_convert_(cam->current_decode_buffer_);
+        } else if (cam->resizing_()) {
+          // The scalar fallback below always writes at native width_/height_
+          // stride. update_canvas_() unconditionally declares the canvas at
+          // render_width_()/render_height_() (the resized stride) whenever
+          // resizing_() is on — it has no way to know this particular frame
+          // took the non-PPA path. The existing safeguards only turn resizing_
+          // off on a *permanent* PPA failure (init, runtime SRM error, decode
+          // task creation failure); they don't cover this *per-frame* fallback
+          // (taken e.g. when the stream's actual SPS resolution doesn't match
+          // the configured width_/height_ — see the crop/letterbox branch in
+          // decode_h264_to_yuv_). Writing native-stride data into a
+          // render-stride canvas here would be read back at the wrong stride
+          // -> a torn/garbled frame flashing in between good ones. Drop the
+          // frame instead; the resolution mismatch itself is already warned
+          // about once in decode_h264_to_yuv_().
+          static uint32_t skipped = 0;
+          if (++skipped % 100 == 1)
+            ESP_LOGW(TAG, "Skipping a frame: scalar fallback can't honor "
+                          "display_width/display_height for this frame (resolution "
+                          "mismatch — check that width/height match the stream)");
+          converted = false;
         } else {
           cam->convert_yuv420_to_rgb565_(cam->yuv_buffer_, cam->current_decode_buffer_,
                                          cam->width_, cam->height_);
