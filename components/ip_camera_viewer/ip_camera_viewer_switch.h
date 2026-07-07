@@ -2,7 +2,6 @@
 
 #include "esphome/components/switch/switch.h"
 #include "esphome/core/component.h"
-#include "esphome/core/preferences.h"
 #include "ip_camera_viewer.h"
 
 namespace esphome {
@@ -19,7 +18,6 @@ class IPCameraViewerSwitch : public switch_::Switch, public Component {
   void write_state(bool state) override;
 
   IPCameraViewer *camera_{nullptr};
-  ESPPreferenceObject rtc_;
 };
 
 }  // namespace ip_camera_viewer
