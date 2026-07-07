@@ -16,6 +16,7 @@ CONF_WIDTH = "width"
 CONF_HEIGHT = "height"
 CONF_DISPLAY_WIDTH = "display_width"
 CONF_DISPLAY_HEIGHT = "display_height"
+CONF_KEEP_ALIVE = "keep_alive"
 CONF_PROTOCOL = "protocol"
 
 ip_camera_viewer_ns = cg.esphome_ns.namespace("ip_camera_viewer")
@@ -68,6 +69,14 @@ IP_CAMERA_VIEWER_SCHEMA = cv.All(cv.Schema({
     cv.Optional(CONF_DISPLAY_WIDTH): cv.int_range(min=16, max=1920),
     cv.Optional(CONF_DISPLAY_HEIGHT): cv.int_range(min=16, max=1080),
     cv.Optional(CONF_PROTOCOL, default="mjpeg"): cv.one_of("mjpeg", "rtsp", "h264", lower=True),
+    # Par défaut (false) : le switch OFF déconnecte le flux et libère la PSRAM
+    # (décodeur inclus) — comportement historique, sobre en ressources. Activer
+    # keep_alive fait tourner la connexion + le décodage en tâche de fond même
+    # switch éteint, pour que le ON suivant n'ait qu'à réafficher (quasi
+    # instantané) au lieu de reconnecter + réallouer (~1-2 s à froid, RTSP High
+    # Profile) — utile pour un affichage déclenché par automatisation qui doit
+    # réagir vite. Coûte de la PSRAM et de la bande passante caméra en continu.
+    cv.Optional(CONF_KEEP_ALIVE, default=False): cv.boolean,
     cv.Optional(CONF_UPDATE_INTERVAL, default="100ms"): cv.positive_time_period_milliseconds,
 }).extend(cv.COMPONENT_SCHEMA), _validate_url_protocol)
 
@@ -103,6 +112,7 @@ async def to_code(config):
         if CONF_DISPLAY_WIDTH in cam_config:
             cg.add(var.set_display_size(cam_config[CONF_DISPLAY_WIDTH], cam_config[CONF_DISPLAY_HEIGHT]))
         cg.add(var.set_protocol(cam_config[CONF_PROTOCOL]))
+        cg.add(var.set_keep_alive(cam_config[CONF_KEEP_ALIVE]))
 
         update_interval_ms = cam_config[CONF_UPDATE_INTERVAL].total_milliseconds
         cg.add(var.set_update_interval(int(update_interval_ms)))

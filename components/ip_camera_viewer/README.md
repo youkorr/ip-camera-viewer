@@ -330,6 +330,39 @@ ip_camera_viewer:
 > **Protocol values:** use `mjpeg` (HTTP MJPEG) or `rtsp` (RTSP/H.264). `h264`
 > is accepted as an alias for `rtsp`.
 
+### Instant redisplay (`keep_alive`)
+
+By default, turning the camera's switch off disconnects the stream and frees
+its PSRAM (buffers, and for RTSP High profile, the edge264 decoder's several
+MB of DPB). Turning it back on pays a reconnect + cold decode cost — on a
+High profile RTSP stream this can be ~1-2 seconds before the first frame
+shows. Fine for a dashboard you leave on, but too slow if an automation
+(motion sensor, doorbell, ...) turns the camera on and needs it to appear
+right away.
+
+```yaml
+ip_camera_viewer:
+  - id: security_cam_1
+    url: "rtsp://username:password@192.168.1.137:554/h264Preview_01_sub"
+    protocol: rtsp
+    width: 640
+    height: 360
+    canvas_id: security_canvas
+    keep_alive: true
+```
+
+With `keep_alive: true`, turning the switch off only stops the on-screen
+display — the RTSP/MJPEG connection and the decode task keep running in the
+background, buffers and decoder stay allocated. Turning it back on just
+resumes showing frames from the already-running stream: no reconnect, no
+cold decode, effectively instant.
+
+**Trade-off:** the camera connection, decoding, and the PSRAM it uses stay
+active continuously, even while nothing is displayed — costs camera
+bandwidth and a few MB of PSRAM permanently (more with `display_width`/
+`display_height` resize, more still with multiple `keep_alive` cameras).
+Leave it `false` (default) for cameras you don't need to pop up instantly.
+
 ### Display resize (`display_width` / `display_height`)
 
 Many cameras' RTSP sub-streams are low resolution (e.g. 640x360 for a Reolink

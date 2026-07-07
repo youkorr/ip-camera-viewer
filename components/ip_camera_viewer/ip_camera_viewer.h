@@ -49,6 +49,13 @@ class IPCameraViewer : public Component {
   void set_display_size(uint16_t w, uint16_t h) { this->display_width_ = w; this->display_height_ = h; }
   void set_update_interval(uint32_t interval_ms) { this->update_interval_ = interval_ms; }
   void set_enabled(bool enabled) { this->enabled_ = enabled; }
+  // Si vrai, le switch OFF n'arrête QUE l'affichage (timer LVGL) : la connexion
+  // RTSP/MJPEG et la tâche de décodage continuent en tâche de fond, buffers et
+  // décodeur restent alloués. Le switch ON suivant saute donc la reconnexion et
+  // la réallocation -> quasi instantané (juste recréer le timer), au prix d'une
+  // PSRAM/bande passante caméra utilisées en continu même écran éteint. Défaut
+  // false = comportement historique (déconnexion + libération mémoire au OFF).
+  void set_keep_alive(bool keep_alive) { this->keep_alive_ = keep_alive; }
   void set_protocol(const std::string &protocol) {
     // "rtsp" and "h264" are aliases for the same RTSP/H.264 path
     if (protocol == "rtsp" || protocol == "h264") {
@@ -76,6 +83,7 @@ class IPCameraViewer : public Component {
   uint16_t render_width_() const { return this->display_width_ ? this->display_width_ : this->width_; }
   uint16_t render_height_() const { return this->display_height_ ? this->display_height_ : this->height_; }
   bool resizing_() const { return this->display_width_ != 0; }
+  bool keep_alive_{false};
   Protocol protocol_{Protocol::MJPEG};
 
   lv_obj_t *canvas_obj_{nullptr};

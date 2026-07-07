@@ -180,6 +180,25 @@ void IPCameraViewer::decode_task_fn_(void *arg) {
 }
 
 void IPCameraViewer::loop() {
+  // keep_alive fast path: if the stream is still connected in the background
+  // (never disconnected by the OFF branch below) and its buffers are still
+  // allocated, skip WiFi checks / reconnection / reallocation entirely and
+  // just resume displaying — the decode task never stopped, so the next
+  // frame is already fresh. This is the whole point of keep_alive: turn a
+  // ~1-2 s cold reconnect+realloc (RTSP High Profile) into "recreate a timer".
+  // Falls through to the normal path below if the connection actually died in
+  // the background (stream_connected_ goes false on a real socket error — see
+  // fetch_rtp_frame_) so a stale/dead session doesn't get stuck silently.
+  if (this->enabled_ && this->lvgl_timer_ == nullptr && this->keep_alive_ &&
+      this->stream_connected_ && this->rgb565_buffer_a_ != nullptr) {
+    this->lvgl_timer_ = lv_timer_create(lvgl_timer_callback_, this->update_interval_, this);
+    if (this->lvgl_timer_ != nullptr) {
+      ESP_LOGI(TAG, "IP Camera Viewer display resumed (keep_alive: stream was already running)");
+      return;
+    }
+    ESP_LOGE(TAG, "Failed to create LVGL timer");
+  }
+
   // Start timer when enabled
   if (this->enabled_ && this->lvgl_timer_ == nullptr) {
     uint32_t now = millis();
@@ -276,7 +295,13 @@ void IPCameraViewer::loop() {
     lv_timer_del(this->lvgl_timer_);
     this->lvgl_timer_ = nullptr;
 
-    if (this->decode_task_handle_ != nullptr) {
+    if (this->keep_alive_) {
+      // keep_alive: only the display stops. Connection, buffers and the
+      // decode task (RTSP/MJPEG fetch + decode + PPA) keep running exactly as
+      // before — that's what lets the next ON skip straight to the fast path
+      // above instead of paying the reconnect+realloc cost again.
+      ESP_LOGI(TAG, "Display hidden (keep_alive: still decoding in the background)");
+    } else if (this->decode_task_handle_ != nullptr) {
       // Une tâche de décodage tourne en fond et peut être EN TRAIN d'utiliser les
       // buffers/le socket. On ne libère pas ici (use-after-free) : on pose la
       // consigne d'arrêt et on libérera dès que la tâche est idle (bloc
@@ -2038,7 +2063,15 @@ bool IPCameraViewer::fetch_rtp_frame_() {
       } else if (len < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
         d_eagain++;  // no new data this tick
       } else {
-        return false;  // socket error / closed
+        // Socket genuinely dead (closed by peer, reset, ...). Close it and
+        // mark disconnected so the NEXT enable properly reconnects instead of
+        // trying (and failing forever) to reuse a broken socket — this matters
+        // most for keep_alive, whose fast path in loop() only skips
+        // reconnection while stream_connected_ is actually true.
+        close(this->rtsp_socket_);
+        this->rtsp_socket_ = -1;
+        this->stream_connected_ = false;
+        return false;
       }
     }
 
@@ -2651,6 +2684,8 @@ void IPCameraViewer::dump_config() {
                   this->display_height_);
   }
   ESP_LOGCONFIG(TAG, "  Update interval: %u ms", this->update_interval_);
+  ESP_LOGCONFIG(TAG, "  Keep alive: %s", this->keep_alive_ ? "yes (instant redisplay, background "
+                                                              "decode stays on while hidden)" : "no");
 }
 
 }  // namespace ip_camera_viewer
