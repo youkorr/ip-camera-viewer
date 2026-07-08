@@ -56,6 +56,13 @@ class IPCameraViewer : public Component {
   // PSRAM/bande passante caméra utilisées en continu même écran éteint. Défaut
   // false = comportement historique (déconnexion + libération mémoire au OFF).
   void set_keep_alive(bool keep_alive) { this->keep_alive_ = keep_alive; }
+  // Active/désactive le keepalive RTSP périodique (GET_PARAMETER toutes les 15 s).
+  // Défaut true : nécessaire pour les caméras qui ferment une session de contrôle
+  // inactive (Reolink ~30 s). Peut être mis à false pour les caméras qui n'en ont
+  // pas besoin (beaucoup de Tapo tiennent la session sans ping) : la réponse RTSP
+  // à ce GET_PARAMETER arrive mélangée au flux RTP interleavé et ajoute un peu de
+  // bruit à re-synchroniser, donc le couper allège marginalement le pipeline.
+  void set_rtsp_keepalive(bool enabled) { this->rtsp_keepalive_enabled_ = enabled; }
   void set_protocol(const std::string &protocol) {
     // "rtsp" and "h264" are aliases for the same RTSP/H.264 path
     if (protocol == "rtsp" || protocol == "h264") {
@@ -200,6 +207,7 @@ class IPCameraViewer : public Component {
   // même si le socket TCP reste ouvert (symptôme : eagain permanent, 0 nouveau
   // paquet). On envoie un GET_PARAMETER toutes les 15 s pour garder la session.
   uint32_t last_keepalive_{0};
+  bool rtsp_keepalive_enabled_{true};  // voir set_rtsp_keepalive()
   std::string rtsp_auth_{};  // Base64 encoded credentials (Basic auth)
   std::string rtsp_user_{};  // Username (for Digest auth)
   std::string rtsp_pass_{};  // Password (for Digest auth)

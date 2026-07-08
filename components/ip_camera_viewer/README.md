@@ -406,6 +406,31 @@ bandwidth and a few MB of PSRAM permanently (more with `display_width`/
 `display_height` resize, more still with multiple `keep_alive` cameras).
 Leave it `false` (default) for cameras you don't need to pop up instantly.
 
+### RTSP keepalive (`rtsp_keepalive`)
+
+Some cameras close an RTSP control session that has been idle for a while
+(≈30 s on Reolink) — the TCP socket stays open but no more RTP packets
+arrive and the video freezes. To prevent this, the component sends a
+`GET_PARAMETER` request on the control connection every 15 s by default.
+
+```yaml
+ip_camera_viewer:
+  - id: security_cam_1
+    url: "rtsp://username:password@192.168.1.56:554/stream2"
+    protocol: rtsp
+    width: 640
+    height: 352
+    canvas_id: security_canvas
+    rtsp_keepalive: false   # default is true
+```
+
+Set `rtsp_keepalive: false` for cameras that hold the session open on their
+own (many Tapo models do). The camera's reply to the `GET_PARAMETER` arrives
+interleaved into the RTP stream and has to be re-synced out of it, so turning
+the keepalive off removes that small amount of noise from the pipeline. Only
+disable it if the stream stays alive without it — if the video freezes after
+~30 s, the camera needs the keepalive, so leave it on.
+
 ### Display resize (`display_width` / `display_height`)
 
 Many cameras' RTSP sub-streams are low resolution (e.g. 640x360 for a Reolink

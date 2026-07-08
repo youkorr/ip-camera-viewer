@@ -17,6 +17,7 @@ CONF_HEIGHT = "height"
 CONF_DISPLAY_WIDTH = "display_width"
 CONF_DISPLAY_HEIGHT = "display_height"
 CONF_KEEP_ALIVE = "keep_alive"
+CONF_RTSP_KEEPALIVE = "rtsp_keepalive"
 CONF_PROTOCOL = "protocol"
 
 ip_camera_viewer_ns = cg.esphome_ns.namespace("ip_camera_viewer")
@@ -77,6 +78,12 @@ IP_CAMERA_VIEWER_SCHEMA = cv.All(cv.Schema({
     # Profile) — utile pour un affichage déclenché par automatisation qui doit
     # réagir vite. Coûte de la PSRAM et de la bande passante caméra en continu.
     cv.Optional(CONF_KEEP_ALIVE, default=False): cv.boolean,
+    # Keepalive RTSP (GET_PARAMETER toutes les 15 s). Défaut true : certaines
+    # caméras (Reolink ~30 s) ferment une session de contrôle inactive sans ce
+    # "ping" et le flux se fige. À mettre false pour les caméras qui tiennent la
+    # session seules (souvent le cas des Tapo) : la réponse RTSP au GET_PARAMETER
+    # arrive mêlée au flux RTP interleavé, la couper allège un peu le pipeline.
+    cv.Optional(CONF_RTSP_KEEPALIVE, default=True): cv.boolean,
     cv.Optional(CONF_UPDATE_INTERVAL, default="100ms"): cv.positive_time_period_milliseconds,
 }).extend(cv.COMPONENT_SCHEMA), _validate_url_protocol)
 
@@ -113,6 +120,7 @@ async def to_code(config):
             cg.add(var.set_display_size(cam_config[CONF_DISPLAY_WIDTH], cam_config[CONF_DISPLAY_HEIGHT]))
         cg.add(var.set_protocol(cam_config[CONF_PROTOCOL]))
         cg.add(var.set_keep_alive(cam_config[CONF_KEEP_ALIVE]))
+        cg.add(var.set_rtsp_keepalive(cam_config[CONF_RTSP_KEEPALIVE]))
 
         update_interval_ms = cam_config[CONF_UPDATE_INTERVAL].total_milliseconds
         cg.add(var.set_update_interval(int(update_interval_ms)))

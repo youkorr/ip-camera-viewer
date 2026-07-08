@@ -2061,10 +2061,12 @@ bool IPCameraViewer::fetch_rtp_frame_() {
   // On envoie un GET_PARAMETER toutes les 15 s sur ce même socket pour tenir la
   // session ouverte. Exécuté ici (thread de la tâche de décodage qui possède le
   // socket) : aucun accès concurrent au socket ni au CSeq.
-  uint32_t now_ka = millis();
-  if (now_ka - this->last_keepalive_ >= 15000) {
-    this->last_keepalive_ = now_ka;
-    this->send_rtsp_keepalive_();
+  if (this->rtsp_keepalive_enabled_) {
+    uint32_t now_ka = millis();
+    if (now_ka - this->last_keepalive_ >= 15000) {
+      this->last_keepalive_ = now_ka;
+      this->send_rtsp_keepalive_();
+    }
   }
 
   // --- Régulateur de latence (voir ip_camera_viewer.h) ----------------------
@@ -2760,6 +2762,9 @@ void IPCameraViewer::dump_config() {
   ESP_LOGCONFIG(TAG, "  Update interval: %u ms", this->update_interval_);
   ESP_LOGCONFIG(TAG, "  Keep alive: %s", this->keep_alive_ ? "yes (instant redisplay, background "
                                                               "decode stays on while hidden)" : "no");
+  if (this->protocol_ == Protocol::RTSP)
+    ESP_LOGCONFIG(TAG, "  RTSP keepalive (GET_PARAMETER): %s",
+                  this->rtsp_keepalive_enabled_ ? "yes (every 15 s)" : "no");
 }
 
 }  // namespace ip_camera_viewer
