@@ -18,6 +18,7 @@ CONF_DISPLAY_WIDTH = "display_width"
 CONF_DISPLAY_HEIGHT = "display_height"
 CONF_KEEP_ALIVE = "keep_alive"
 CONF_RTSP_KEEPALIVE = "rtsp_keepalive"
+CONF_BUFFER_FRAMES = "buffer_frames"
 CONF_PROTOCOL = "protocol"
 
 ip_camera_viewer_ns = cg.esphome_ns.namespace("ip_camera_viewer")
@@ -48,6 +49,12 @@ def _validate_url_protocol(config):
             "'display_width'/'display_height' need the ESP32-P4 PPA path, only wired "
             "for protocol: rtsp/h264. The MJPEG path is decoded directly at native "
             "size by the hardware JPEG decoder."
+        )
+    if config.get(CONF_BUFFER_FRAMES, 0) and proto == "mjpeg":
+        raise cv.Invalid(
+            "'buffer_frames' (smoothing jitter buffer) is only wired for the "
+            "protocol: rtsp/h264 decode task. MJPEG is decoded inline at display "
+            "rate and doesn't use it."
         )
     return config
 
@@ -84,6 +91,14 @@ IP_CAMERA_VIEWER_SCHEMA = cv.All(cv.Schema({
     # session seules (souvent le cas des Tapo) : la réponse RTSP au GET_PARAMETER
     # arrive mêlée au flux RTP interleavé, la couper allège un peu le pipeline.
     cv.Optional(CONF_RTSP_KEEPALIVE, default=True): cv.boolean,
+    # Tampon de lissage (jitter buffer). 0 (défaut) = temps réel, latence mini
+    # mais un léger à-coup à chaque image-clé (IDR). 2-3 = la tâche décode
+    # d'avance et l'affichage tire à cadence régulière -> vidéo lissée, au prix
+    # de ~N frames de latence et N+2 buffers RGB565 en PSRAM. RTSP/H.264 seul.
+    # Utile surtout si la source est proche de la limite de décodage du P4.
+    cv.Optional(CONF_BUFFER_FRAMES, default=0): cv.All(
+        cv.int_, cv.one_of(0, 2, 3)
+    ),
     cv.Optional(CONF_UPDATE_INTERVAL, default="100ms"): cv.positive_time_period_milliseconds,
 }).extend(cv.COMPONENT_SCHEMA), _validate_url_protocol)
 
@@ -121,6 +136,7 @@ async def to_code(config):
         cg.add(var.set_protocol(cam_config[CONF_PROTOCOL]))
         cg.add(var.set_keep_alive(cam_config[CONF_KEEP_ALIVE]))
         cg.add(var.set_rtsp_keepalive(cam_config[CONF_RTSP_KEEPALIVE]))
+        cg.add(var.set_buffer_frames(cam_config[CONF_BUFFER_FRAMES]))
 
         update_interval_ms = cam_config[CONF_UPDATE_INTERVAL].total_milliseconds
         cg.add(var.set_update_interval(int(update_interval_ms)))

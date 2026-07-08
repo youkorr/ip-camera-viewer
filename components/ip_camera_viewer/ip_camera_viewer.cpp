@@ -105,6 +105,13 @@ void IPCameraViewer::setup() {
         this->display_width_ = 0;
         this->display_height_ = 0;
       }
+      // Le jitter buffer est alimenté par la tâche dédiée (producteur) : sans elle
+      // il ne sert à rien. Le libérer (récupère la PSRAM) et repasser en temps réel.
+      if (this->buffer_frames_ > 0) {
+        ESP_LOGW(TAG, "Disabling smoothing buffer (no dedicated decode task) — real-time mode.");
+        this->buffer_frames_ = 0;
+        this->free_frame_ring_();
+      }
     } else {
       ESP_LOGI(TAG, "Dedicated H.264 decode task running — LVGL will no longer freeze.");
     }
@@ -149,57 +156,32 @@ void IPCameraViewer::decode_task_fn_(void *arg) {
     // simplement abandonnée (le DPB, lui, reste à jour). La latence reste ~0 et
     // c'est le rythme d'affichage qui régule, plus la file d'attente.
     if (cam->fetch_rtp_frame_()) {
-      if (cam->decode_h264_to_yuv_() &&
-          !cam->decode_frame_ready_.load(std::memory_order_acquire)) {
-        // DIAG : temps de conversion YUV->RGB565 moyenné sur 64 frames. PPA
-        // matériel quand la frame est au format O_UYY (voir decode_h264_to_yuv_),
-        // conversion scalaire sinon.
-        const int64_t _cv0 = esp_timer_get_time();
-        bool converted;
-        if (cam->yuv_is_ouyy_ && cam->ppa_ok_) {
-          converted = cam->ppa_convert_(cam->current_decode_buffer_);
-        } else if (cam->resizing_()) {
-          // The scalar fallback below always writes at native width_/height_
-          // stride. update_canvas_() unconditionally declares the canvas at
-          // render_width_()/render_height_() (the resized stride) whenever
-          // resizing_() is on — it has no way to know this particular frame
-          // took the non-PPA path. The existing safeguards only turn resizing_
-          // off on a *permanent* PPA failure (init, runtime SRM error, decode
-          // task creation failure); they don't cover this *per-frame* fallback
-          // (taken e.g. when the stream's actual SPS resolution doesn't match
-          // the configured width_/height_ — see the crop/letterbox branch in
-          // decode_h264_to_yuv_). Writing native-stride data into a
-          // render-stride canvas here would be read back at the wrong stride
-          // -> a torn/garbled frame flashing in between good ones. Drop the
-          // frame instead; the resolution mismatch itself is already warned
-          // about once in decode_h264_to_yuv_().
-          static uint32_t skipped = 0;
-          if (++skipped % 100 == 1)
-            ESP_LOGW(TAG, "Skipping a frame: scalar fallback can't honor "
-                          "display_width/display_height for this frame (resolution "
-                          "mismatch — check that width/height match the stream)");
-          converted = false;
-        } else {
-          cam->convert_yuv420_to_rgb565_(cam->yuv_buffer_, cam->current_decode_buffer_,
-                                         cam->width_, cam->height_);
-          converted = true;
+      if (cam->decode_h264_to_yuv_()) {
+        if (cam->ring_active_()) {
+          // --- Producteur du jitter buffer -----------------------------------
+          // Prend un buffer LIBRE ; si l'anneau est plein, évince la plus ANCIENNE
+          // frame prête pour la réutiliser (latence bornée à N, on garde toujours
+          // les frames les plus fraîches). Convertit dedans puis publie.
+          uint8_t *dst = nullptr;
+          if (xQueueReceive(cam->ring_free_q_, &dst, 0) != pdTRUE) {
+            if (xQueueReceive(cam->ring_filled_q_, &dst, 0) != pdTRUE)
+              dst = nullptr;  // ne devrait pas arriver (cap couvre tous les buffers)
+          }
+          if (dst != nullptr) {
+            if (cam->convert_decoded_(dst))
+              xQueueSend(cam->ring_filled_q_, &dst, 0);
+            else
+              xQueueSend(cam->ring_free_q_, &dst, 0);  // sautée : rendre le buffer
+          }
+        } else if (!cam->decode_frame_ready_.load(std::memory_order_acquire)) {
+          // --- Mode temps réel (historique) : convertir seulement si l'affichage
+          // a consommé la frame précédente (sinon on la laisse tomber). -----------
+          if (cam->convert_decoded_(cam->current_decode_buffer_)) {
+            // Release : la frame convertie dans current_decode_buffer_ est visible
+            // pour le loopTask après qu'il ait vu decode_frame_ready_ == true.
+            cam->decode_frame_ready_.store(true, std::memory_order_release);
+          }
         }
-        static int64_t cv_acc = 0;
-        static uint32_t cv_n = 0;
-        cv_acc += esp_timer_get_time() - _cv0;
-        if (++cv_n == 64) {
-          // DEBUG, not INFO: this fires every ~64 frames (a few times a minute
-          // at streaming rate) and the UART logger itself costs CPU time.
-          ESP_LOGD(TAG, "YUV->RGB565 conversion: %lld ms/frame (64-frame average%s)",
-                   (long long) (cv_acc / 64000),
-                   (cam->yuv_is_ouyy_ && cam->ppa_ok_) ? ", PPA" : ", CPU");
-          cv_acc = 0;
-          cv_n = 0;
-        }
-        // Release : la frame convertie dans current_decode_buffer_ est visible pour
-        // le loopTask qui la lira après avoir vu decode_frame_ready_ == true.
-        if (converted)
-          cam->decode_frame_ready_.store(true, std::memory_order_release);
       }
     } else {
       vTaskDelay(pdMS_TO_TICKS(3));
@@ -460,45 +442,47 @@ void IPCameraViewer::lvgl_timer_callback_(lv_timer_t *timer) {
   // Check and adapt to network quality
   cam->check_network_quality_();
 
-  bool frame_ready = false;
-
-  if (cam->protocol_ == Protocol::MJPEG) {
-    if (cam->fetch_jpeg_frame_()) {
-      frame_ready = cam->decode_jpeg_to_rgb565_();
-    }
-  } else {
-    // H.264 : si la tâche de décodage dédiée existe, le décodage (fetch RTP + edge264
-    // + conversion) tourne EN FOND sur decode_task_fn_. Ici, sur le loopTask, on ne
-    // fait QUE récupérer une frame déjà prête -> LVGL/tactile/audio ne gèlent plus,
-    // même pendant les ~11 s d'une I-frame. Repli sur décodage en ligne si la tâche
-    // n'a pas pu être créée (mémoire).
-    if (cam->decode_task_handle_ != nullptr) {
-      // acquire : si true, les écritures du buffer par la tâche sont visibles ici.
-      frame_ready = cam->decode_frame_ready_.load(std::memory_order_acquire);
-    } else {
-      if (cam->fetch_rtp_frame_()) {
-        if (cam->decode_h264_to_yuv_()) {
-          cam->convert_yuv420_to_rgb565_(cam->yuv_buffer_, cam->current_decode_buffer_,
-                                         cam->width_, cam->height_);
-          frame_ready = true;
-        }
-      }
-    }
-  }
-
   // Compteur de ticks SANS nouvelle frame. Remis à zéro dès qu'une frame passe :
   // l'ancien compteur cumulatif ne se réinitialisait jamais et continuait de
   // logguer "No H264 frames decoded yet" alors que des frames s'affichaient.
   static uint32_t no_frame_count = 0;
 
-  if (frame_ready) {
-    no_frame_count = 0;
-    cam->update_canvas_();
-    cam->swap_buffers_();
-    // Handshake avec la tâche de décodage : on a consommé la frame -> elle peut
-    // préparer la suivante dans le buffer maintenant libre (post-swap).
-    if (cam->decode_task_handle_ != nullptr && cam->protocol_ != Protocol::MJPEG)
+  // Affiche AU PLUS une frame par tick et pose le canvas. Quatre chemins :
+  //  - MJPEG : décodage en ligne ici (pas de tâche dédiée).
+  //  - RING  : jitter buffer actif -> tirer la prochaine frame lissée.
+  //  - tâche dédiée H.264 : la frame est déjà prête (decode_frame_ready_).
+  //  - repli en ligne (tâche non créée) : fetch+decode+convert ici même.
+  bool shown = false;
+  if (cam->protocol_ == Protocol::MJPEG) {
+    if (cam->fetch_jpeg_frame_() && cam->decode_jpeg_to_rgb565_()) {
+      cam->update_canvas_();
+      cam->swap_buffers_();
+      shown = true;
+    }
+  } else if (cam->ring_active_()) {
+    // Consommateur du jitter buffer : cadence régulière, pose le canvas lui-même.
+    shown = cam->ring_show_next_();
+  } else if (cam->decode_task_handle_ != nullptr) {
+    // acquire : si true, les écritures du buffer par la tâche sont visibles ici.
+    if (cam->decode_frame_ready_.load(std::memory_order_acquire)) {
+      cam->update_canvas_();
+      cam->swap_buffers_();
+      // Handshake : frame consommée -> la tâche peut préparer la suivante.
       cam->decode_frame_ready_.store(false, std::memory_order_release);
+      shown = true;
+    }
+  } else {
+    if (cam->fetch_rtp_frame_() && cam->decode_h264_to_yuv_()) {
+      cam->convert_yuv420_to_rgb565_(cam->yuv_buffer_, cam->current_decode_buffer_,
+                                     cam->width_, cam->height_);
+      cam->update_canvas_();
+      cam->swap_buffers_();
+      shown = true;
+    }
+  }
+
+  if (shown) {
+    no_frame_count = 0;
     cam->frame_count_++;
 
     // Log FPS every 100 frames
@@ -764,10 +748,71 @@ bool IPCameraViewer::init_buffers_() {
       this->display_width_ = 0;
       this->display_height_ = 0;
     }
+
+    // Tampon de lissage optionnel (buffer_frames_ > 0). Alloué en dernier : s'il
+    // échoue (PSRAM insuffisante), on retombe proprement sur le mode temps réel
+    // (a_/b_) sans faire échouer tout le composant.
+    if (this->buffer_frames_ > 0)
+      this->init_frame_ring_();
   }
 
   ESP_LOGI(TAG, "Buffers allocated successfully");
   return true;
+}
+
+bool IPCameraViewer::init_frame_ring_() {
+  // Anneau de (N+2) buffers RGB565, alloués SÉPARÉMENT de a_/b_ (qui restent le
+  // chemin de repli temps réel : mode inline si la tâche échoue, protocole MJPEG,
+  // buffer_frames_==0). N frames de profondeur utile + 1 affiché + 1 en écriture.
+  this->ring_cap_ = (uint8_t) (this->buffer_frames_ + 2);
+  if (this->ring_cap_ > IPCV_RING_MAX)
+    this->ring_cap_ = IPCV_RING_MAX;
+
+  this->ring_free_q_ = xQueueCreate(this->ring_cap_, sizeof(uint8_t *));
+  this->ring_filled_q_ = xQueueCreate(this->ring_cap_, sizeof(uint8_t *));
+  if (this->ring_free_q_ == nullptr || this->ring_filled_q_ == nullptr) {
+    ESP_LOGW(TAG, "buffer_frames: could not create ring queues — real-time mode.");
+    this->free_frame_ring_();
+    return false;
+  }
+
+  for (uint8_t i = 0; i < this->ring_cap_; i++) {
+    this->ring_buf_[i] = (uint8_t *) heap_caps_aligned_alloc(128, this->rgb565_buffer_size_,
+                                                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (this->ring_buf_[i] == nullptr) {
+      ESP_LOGW(TAG, "buffer_frames=%u needs %u buffers of %u B but PSRAM ran out at #%u "
+                    "— falling back to real-time mode (no smoothing buffer).",
+               this->buffer_frames_, this->ring_cap_, (unsigned) this->rgb565_buffer_size_, i);
+      this->free_frame_ring_();
+      return false;
+    }
+    // Tous les buffers commencent LIBRES.
+    xQueueSend(this->ring_free_q_, &this->ring_buf_[i], 0);
+  }
+  this->ring_display_buf_ = nullptr;
+  ESP_LOGI(TAG, "Smoothing buffer enabled: %u frames (%u RGB565 buffers, %.2f MB extra PSRAM)",
+           this->buffer_frames_, this->ring_cap_,
+           (double) this->ring_cap_ * this->rgb565_buffer_size_ / 1024.0 / 1024.0);
+  return true;
+}
+
+void IPCameraViewer::free_frame_ring_() {
+  if (this->ring_free_q_ != nullptr) {
+    vQueueDelete(this->ring_free_q_);
+    this->ring_free_q_ = nullptr;
+  }
+  if (this->ring_filled_q_ != nullptr) {
+    vQueueDelete(this->ring_filled_q_);
+    this->ring_filled_q_ = nullptr;
+  }
+  for (uint8_t i = 0; i < IPCV_RING_MAX; i++) {
+    if (this->ring_buf_[i] != nullptr) {
+      free(this->ring_buf_[i]);
+      this->ring_buf_[i] = nullptr;
+    }
+  }
+  this->ring_display_buf_ = nullptr;
+  this->ring_cap_ = 0;
 }
 
 void IPCameraViewer::free_buffers_() {
@@ -783,6 +828,11 @@ void IPCameraViewer::free_buffers_() {
     this->hp_started_ = false;
   }
 #endif
+
+  // Free the smoothing ring (safe here: free_buffers_ only runs once the decode
+  // task is idle — see the deferred-shutdown handshake — so no producer/consumer
+  // touches the queues concurrently).
+  this->free_frame_ring_();
 
   // Free RGB565 buffers
   if (this->rgb565_buffer_a_ != nullptr) {
@@ -2725,7 +2775,7 @@ void IPCameraViewer::convert_yuv420_to_rgb565_(uint8_t *yuv, uint8_t *rgb565, in
 // Common Methods
 // ============================================================================
 
-void IPCameraViewer::update_canvas_() {
+void IPCameraViewer::set_canvas_buffer_(uint8_t *buf) {
   if (this->canvas_obj_ == nullptr) {
     if (!this->canvas_warning_shown_) {
       ESP_LOGW(TAG, "Canvas not configured");
@@ -2733,16 +2783,70 @@ void IPCameraViewer::update_canvas_() {
     }
     return;
   }
-
-  lv_canvas_set_buffer(this->canvas_obj_, this->current_decode_buffer_,
-                       this->render_width_(), this->render_height_(), LV_COLOR_FORMAT_RGB565);
+  lv_canvas_set_buffer(this->canvas_obj_, buf, this->render_width_(), this->render_height_(),
+                       LV_COLOR_FORMAT_RGB565);
   lv_obj_invalidate(this->canvas_obj_);
 }
+
+void IPCameraViewer::update_canvas_() { this->set_canvas_buffer_(this->current_decode_buffer_); }
 
 void IPCameraViewer::swap_buffers_() {
   uint8_t *temp = this->current_display_buffer_;
   this->current_display_buffer_ = this->current_decode_buffer_;
   this->current_decode_buffer_ = temp;
+}
+
+bool IPCameraViewer::convert_decoded_(uint8_t *dst) {
+  // DIAG : temps de conversion YUV->RGB565 moyenné sur 64 frames. PPA matériel
+  // quand la frame est au format O_UYY (voir decode_h264_to_yuv_), scalaire sinon.
+  const int64_t _cv0 = esp_timer_get_time();
+  bool converted;
+  if (this->yuv_is_ouyy_ && this->ppa_ok_) {
+    converted = this->ppa_convert_(dst);
+  } else if (this->resizing_()) {
+    // Le repli scalaire écrit toujours au stride natif width_/height_, alors que
+    // le canvas est déclaré au stride de rendu (render_width_/height_) dès que
+    // resizing_() est actif : écrire ici produirait une frame décalée/déchirée
+    // qui clignote entre les bonnes. On saute la frame (le mismatch de résolution
+    // est déjà signalé une fois dans decode_h264_to_yuv_).
+    static uint32_t skipped = 0;
+    if (++skipped % 100 == 1)
+      ESP_LOGW(TAG, "Skipping a frame: scalar fallback can't honor "
+                    "display_width/display_height for this frame (resolution "
+                    "mismatch — check that width/height match the stream)");
+    converted = false;
+  } else {
+    this->convert_yuv420_to_rgb565_(this->yuv_buffer_, dst, this->width_, this->height_);
+    converted = true;
+  }
+  static int64_t cv_acc = 0;
+  static uint32_t cv_n = 0;
+  cv_acc += esp_timer_get_time() - _cv0;
+  if (++cv_n == 64) {
+    // DEBUG, not INFO: this fires every ~64 frames (a few times a minute at
+    // streaming rate) and the UART logger itself costs CPU time.
+    ESP_LOGD(TAG, "YUV->RGB565 conversion: %lld ms/frame (64-frame average%s)",
+             (long long) (cv_acc / 64000),
+             (this->yuv_is_ouyy_ && this->ppa_ok_) ? ", PPA" : ", CPU");
+    cv_acc = 0;
+    cv_n = 0;
+  }
+  return converted;
+}
+
+bool IPCameraViewer::ring_show_next_() {
+  // Consommateur du jitter buffer (loopTask). Tire la plus ANCIENNE frame prête.
+  uint8_t *buf = nullptr;
+  if (xQueueReceive(this->ring_filled_q_, &buf, 0) != pdTRUE)
+    return false;  // rien de neuf ce tick : le canvas garde l'image précédente.
+  // Rendre le buffer précédemment affiché au pool libre. LVGL a fini de le lire
+  // lors de la passe de refresh précédente (même raisonnement que swap_buffers_ :
+  // on ne repointe le canvas qu'ici, LVGL relira le NOUVEAU buffer cette passe).
+  if (this->ring_display_buf_ != nullptr)
+    xQueueSend(this->ring_free_q_, &this->ring_display_buf_, 0);
+  this->ring_display_buf_ = buf;
+  this->set_canvas_buffer_(buf);
+  return true;
 }
 
 void IPCameraViewer::configure_canvas(lv_obj_t *canvas) {
@@ -2765,6 +2869,11 @@ void IPCameraViewer::dump_config() {
   if (this->protocol_ == Protocol::RTSP)
     ESP_LOGCONFIG(TAG, "  RTSP keepalive (GET_PARAMETER): %s",
                   this->rtsp_keepalive_enabled_ ? "yes (every 15 s)" : "no");
+  if (this->buffer_frames_ > 0)
+    ESP_LOGCONFIG(TAG, "  Smoothing buffer: %u frames (jitter buffer, +~%u ms latency)",
+                  this->buffer_frames_, (unsigned) (this->buffer_frames_ * this->update_interval_));
+  else
+    ESP_LOGCONFIG(TAG, "  Smoothing buffer: off (real-time, min latency)");
 }
 
 }  // namespace ip_camera_viewer

@@ -468,6 +468,51 @@ Notes:
   component logs a warning and falls back to displaying at the stream's
   native resolution rather than risking a corrupted canvas.
 
+### Smoothing buffer (`buffer_frames`)
+
+H.264 decode time is uneven: tiny P-frames decode in a few ms, but a keyframe
+(IDR) is a full intra frame and takes much longer (≈170 ms on the ESP32-P4 for
+a typical sub-stream). By default the component runs in **real-time mode**: it
+shows the newest decoded frame the instant it's ready. Latency is minimal, but
+every keyframe causes a brief hitch (the display repeats the last frame for a
+tick or two while the IDR decodes, then jumps) — visible as periodic stutter,
+especially on streams that push the decoder near its limit.
+
+`buffer_frames` adds a **jitter buffer**: the decode task works a few frames
+ahead into a small ring, and the display pulls from it at a steady cadence. The
+buffered frames cover the keyframe decode, so the hitch disappears and motion
+looks smooth.
+
+```yaml
+ip_camera_viewer:
+  - id: security_cam_1
+    url: "rtsp://username:password@192.168.1.56:554/stream2"
+    protocol: rtsp
+    width: 640
+    height: 360
+    canvas_id: security_canvas
+    update_interval: 66ms   # match your camera's frame rate (15fps -> 66ms, 10fps -> 100ms)
+    buffer_frames: 3        # 0 (default) = real-time, 2 or 3 = smoothed
+```
+
+Notes:
+- **Trade-off:** `buffer_frames: N` adds ≈`N × update_interval` of latency (the
+  image is that much "behind live") and allocates **N+2 extra RGB565 buffers**
+  in PSRAM. At 800×600 that's ~1 MB each, so `buffer_frames: 3` ≈ 5 MB — make
+  sure the board has the headroom (fine on a 32 MB Tab5, tight on smaller PSRAM).
+- Use **2** to smooth a ~10 fps source, **3** for ~15 fps (the buffer must cover
+  one keyframe decode ≈ 170 ms; 3 × 66 ms ≈ 200 ms).
+- Set `update_interval` to match the camera's frame rate — a display cadence
+  that doesn't match the source beats against it and causes judder on its own,
+  buffer or not.
+- Only for `protocol: rtsp`/`h264` (fed by the dedicated decode task). Ignored
+  for MJPEG. If the decode task or the ring buffers can't be allocated, the
+  component logs a warning and falls back to real-time mode.
+- This does **not** speed up decoding — if the decoder genuinely can't keep up
+  with the stream on average, lower the camera's frame rate, bitrate, or
+  resolution, or lengthen its keyframe interval (GOP). The buffer only hides the
+  *unevenness*, not a sustained shortfall.
+
 ### RTSP authentication
 
 Credentials are taken from the URL (`rtsp://user:pass@host:port/path`). Both

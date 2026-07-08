@@ -24,6 +24,7 @@ extern "C" {
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 
 namespace esphome {
 namespace ip_camera_viewer {
@@ -63,6 +64,12 @@ class IPCameraViewer : public Component {
   // à ce GET_PARAMETER arrive mélangée au flux RTP interleavé et ajoute un peu de
   // bruit à re-synchroniser, donc le couper allège marginalement le pipeline.
   void set_rtsp_keepalive(bool enabled) { this->rtsp_keepalive_enabled_ = enabled; }
+  // Profondeur du tampon de lissage (jitter buffer). 0 (défaut) = mode temps réel
+  // historique (afficher la dernière frame prête, latence mini, mais hitch visible
+  // à chaque IDR). >=2 : la tâche décode d'avance dans un anneau de N frames et le
+  // timer d'affichage tire à cadence régulière -> lisse le hitch de l'IDR au prix
+  // de ~N frames de latence et N+2 buffers RGB565 de PSRAM. RTSP/H.264 uniquement.
+  void set_buffer_frames(uint8_t n) { this->buffer_frames_ = n; }
   void set_protocol(const std::string &protocol) {
     // "rtsp" and "h264" are aliases for the same RTSP/H.264 path
     if (protocol == "rtsp" || protocol == "h264") {
@@ -152,6 +159,34 @@ class IPCameraViewer : public Component {
   std::atomic<bool> decode_run_{true};
   std::atomic<bool> decode_task_idle_{true};
   bool pending_shutdown_{false};
+
+  // --- Tampon de lissage (jitter buffer) — voir set_buffer_frames() -----------
+  // Anneau de N+2 buffers RGB565 échangés entre la tâche de décodage (producteur,
+  // cœur 1) et le timer d'affichage (consommateur, cœur 0) via deux files
+  // FreeRTOS (thread-safe SMP). Le producteur convertit chaque frame décodée dans
+  // un buffer LIBRE et le pousse dans "filled" ; s'il n'y a plus de buffer libre,
+  // il évince la plus ANCIENNE frame de "filled" pour la réutiliser (latence
+  // bornée à N, on garde toujours les frames les plus fraîches). Le consommateur
+  // tire la plus ancienne de "filled" à chaque tick régulier -> cadence lisse.
+  // Actif seulement si buffer_frames_>0 ET la tâche dédiée existe (voir ring_active_()).
+  static constexpr uint8_t IPCV_RING_MAX = 5;  // N max = 3 -> cap max = 5
+  uint8_t buffer_frames_{0};                    // N (0 = désactivé)
+  uint8_t ring_cap_{0};                         // N+2 quand alloué, sinon 0
+  uint8_t *ring_buf_[IPCV_RING_MAX]{};          // buffers de l'anneau (alloués à part de a_/b_)
+  uint8_t *ring_display_buf_{nullptr};          // buffer actuellement affiché (détenu par le conso)
+  QueueHandle_t ring_free_q_{nullptr};          // buffers libres (pointeurs)
+  QueueHandle_t ring_filled_q_{nullptr};        // buffers prêts à afficher (FIFO)
+  bool ring_active_() const {
+    return this->ring_cap_ > 0 && this->decode_task_handle_ != nullptr;
+  }
+  bool init_frame_ring_();   // alloue l'anneau + les files (si buffer_frames_>0)
+  void free_frame_ring_();   // libère l'anneau + les files
+  bool ring_show_next_();    // consommateur : affiche la prochaine frame prête (true si affichée)
+  void set_canvas_buffer_(uint8_t *buf);  // pose un buffer sur le canvas (dims de rendu)
+  // Convertit la frame décodée (yuv_buffer_/DPB) vers dst en RGB565 (PPA matériel
+  // ou repli scalaire), avec le chrono de diagnostic. Renvoie true si convertie
+  // (false = frame sautée, ex. resize impossible sur le chemin scalaire).
+  bool convert_decoded_(uint8_t *dst);
 
   // --- Conversion YUV->RGB565 matérielle (PPA du P4) --------------------------
   // La conversion scalaire coûte ~40 ms/frame (dominée par le trafic PSRAM, en
