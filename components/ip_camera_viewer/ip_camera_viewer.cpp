@@ -768,6 +768,28 @@ bool IPCameraViewer::init_frame_ring_() {
   if (this->ring_cap_ > IPCV_RING_MAX)
     this->ring_cap_ = IPCV_RING_MAX;
 
+  // GARDE-FOU PSRAM. init_frame_ring_ tourne dans setup(), AVANT que le DPB
+  // edge264 (créé paresseusement au 1er décodage, plusieurs Mo pour du High
+  // Profile) ne réclame sa mémoire. Si l'anneau prend tout, edge264 démarre mais
+  // ne peut plus sortir de frames (symptôme observé : "frames=0", décodage figé).
+  // On refuse donc l'anneau s'il ne laisse pas une marge confortable pour le DPB
+  // (estimée large : ~24 frames I420 à la résolution du flux), et on retombe
+  // proprement sur le mode temps réel (qui, lui, marche).
+  size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  size_t ring_bytes = (size_t) this->ring_cap_ * this->rgb565_buffer_size_;
+  size_t dpb_reserve = (size_t) this->width_ * this->height_ * 3 / 2 * 24;  // marge DPB généreuse
+  ESP_LOGI(TAG, "buffer_frames=%u: free PSRAM %.2f MB, ring needs %.2f MB, reserving %.2f MB for the decoder",
+           this->buffer_frames_, free_psram / 1048576.0, ring_bytes / 1048576.0,
+           dpb_reserve / 1048576.0);
+  if (free_psram < ring_bytes + dpb_reserve) {
+    ESP_LOGW(TAG, "buffer_frames=%u disabled: not enough PSRAM to keep a safe margin for the "
+                  "H.264 decoder (would starve its frame buffers). Use a smaller buffer_frames, "
+                  "a smaller display_width/height, or free PSRAM. Falling back to real-time mode.",
+             this->buffer_frames_);
+    this->ring_cap_ = 0;
+    return false;
+  }
+
   this->ring_free_q_ = xQueueCreate(this->ring_cap_, sizeof(uint8_t *));
   this->ring_filled_q_ = xQueueCreate(this->ring_cap_, sizeof(uint8_t *));
   if (this->ring_free_q_ == nullptr || this->ring_filled_q_ == nullptr) {
@@ -790,9 +812,9 @@ bool IPCameraViewer::init_frame_ring_() {
     xQueueSend(this->ring_free_q_, &this->ring_buf_[i], 0);
   }
   this->ring_display_buf_ = nullptr;
-  ESP_LOGI(TAG, "Smoothing buffer enabled: %u frames (%u RGB565 buffers, %.2f MB extra PSRAM)",
-           this->buffer_frames_, this->ring_cap_,
-           (double) this->ring_cap_ * this->rgb565_buffer_size_ / 1024.0 / 1024.0);
+  ESP_LOGI(TAG, "Smoothing buffer enabled: %u frames (%u RGB565 buffers, %.2f MB) — free PSRAM now %.2f MB",
+           this->buffer_frames_, this->ring_cap_, ring_bytes / 1048576.0,
+           heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1048576.0);
   return true;
 }
 
