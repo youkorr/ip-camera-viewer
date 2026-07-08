@@ -75,9 +75,19 @@ void IPCameraViewer::setup() {
   // création échoue (RAM interne insuffisante — pense à retirer micro_wake_word),
   // decode_task_handle_ reste nullptr et on décode en ligne (repli sûr).
   if (this->protocol_ == Protocol::RTSP) {
+    // Pin the decode task to core 1. ESPHome's main loop (and therefore ALL the
+    // LVGL rendering + MIPI-DSI flush work) runs on the main task, which ESP-IDF
+    // pins to core 0 by default (CONFIG_ESP_MAIN_TASK_AFFINITY=0). Left as
+    // tskNO_AFFINITY the decoder floats and the scheduler regularly lands it on
+    // core 0 mid-refresh, so edge264 and LVGL fight over the same core (and the
+    // migration thrashes the L1 cache). Isolating the decoder on core 1 gives it
+    // a whole core to itself and stops it stealing cycles from the display path
+    // — priority stays low (1) so anything more important on core 1 still
+    // preempts it. This does NOT fix PSRAM-bandwidth contention (both cores
+    // share the bus — that's the LVGL PPA burst issue), only CPU contention.
     BaseType_t ok = xTaskCreatePinnedToCore(&IPCameraViewer::decode_task_fn_, "ipcv_decode",
                                             28672, this, 1, &this->decode_task_handle_,
-                                            tskNO_AFFINITY);
+                                            1);
     if (ok != pdPASS || this->decode_task_handle_ == nullptr) {
       this->decode_task_handle_ = nullptr;
       ESP_LOGW(TAG, "Dedicated decode task NOT created (out of internal RAM?) — falling back "
