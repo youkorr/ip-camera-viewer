@@ -449,7 +449,69 @@ typedef struct Edge264Decoder {
 #ifndef WORD_BIT
 	#define WORD_BIT 32
 #endif
-#if SIZE_MAX == 4294967295U
+#if defined(__riscv) && !defined(__riscv_zbb)
+	// RISC-V without the Zbb extension (e.g. ESP32-P4 silicon before v3.x) has no
+	// native clz/ctz: the compiler emulates them with a ~30-instruction popcount
+	// sequence (bit-smearing + two 32-bit constants + a multiply). get_ae() calls
+	// clz once per CABAC *bin* — millions of times per second — so that emulation
+	// alone is a top contributor to decode time (and bloats every inlined copy,
+	// hurting I-cache). Replace with: clz = two predictable range checks + one
+	// 256-byte LUT (~8 instructions); ctz = de Bruijn multiply + 32-byte LUT
+	// (~6 instructions, M extension is always present). Same non-zero-input
+	// contract as the builtins; bit-exactness is covered by the QEMU harness.
+	static const uint8_t _e264_clz8_lut[256] = {
+		8, 7, 6, 6, 5, 5, 5, 5, 4, 4, 4, 4, 4, 4, 4, 4,
+		3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+		2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+		2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+		1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+		1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+		1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+		1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	};
+	static const uint8_t _e264_debruijn_ctz[32] = {
+		 0,  1, 28,  2, 29, 14, 24,  3, 30, 22, 20, 15, 25, 17,  4,  8,
+		31, 27, 13, 23, 21, 19, 16,  7, 26, 12, 18,  6, 11,  5, 10,  9,
+	};
+	static inline __attribute__((always_inline)) int _e264_clz32(uint32_t x) {
+		unsigned n = 0;
+		if (x < 0x10000) { n = 16; x <<= 16; }
+		if (x < 0x1000000) { n += 8; x <<= 8; }
+		return n + _e264_clz8_lut[x >> 24];
+	}
+	static inline __attribute__((always_inline)) int _e264_ctz32(uint32_t x) {
+		return _e264_debruijn_ctz[((x & -x) * 0x077CB531u) >> 27];
+	}
+	static inline __attribute__((always_inline)) int _e264_clz64(uint64_t x) {
+		uint32_t hi = x >> 32;
+		return hi ? _e264_clz32(hi) : 32 + _e264_clz32((uint32_t)x);
+	}
+	static inline __attribute__((always_inline)) int _e264_ctz64(uint64_t x) {
+		uint32_t lo = (uint32_t)x;
+		return lo ? _e264_ctz32(lo) : 32 + _e264_ctz32((uint32_t)(x >> 32));
+	}
+	#if SIZE_MAX == 4294967295U
+		#define SIZE_BIT 32
+		#define clz _e264_clz32
+		#define ctz _e264_ctz32
+	#else
+		#define SIZE_BIT 64
+		#define clz _e264_clz64
+		#define ctz _e264_ctz64
+	#endif
+	#define clz32 _e264_clz32
+	#define ctz32 _e264_ctz32
+	#define clz64 _e264_clz64
+	#define ctz64 _e264_ctz64
+#elif SIZE_MAX == 4294967295U
 	#define SIZE_BIT 32
 	#define clz __builtin_clz
 	#define ctz __builtin_ctz
@@ -457,6 +519,14 @@ typedef struct Edge264Decoder {
 	#define SIZE_BIT 64
 	#define clz __builtin_clzll
 	#define ctz __builtin_ctzll
+#endif
+// 32/64-bit-explicit variants for hot call sites that need a fixed width
+// regardless of size_t (map to the plain builtins everywhere but no-Zbb RISC-V).
+#ifndef clz32
+	#define clz32 __builtin_clz
+	#define ctz32 __builtin_ctz
+	#define clz64 __builtin_clzll
+	#define ctz64 __builtin_ctzll
 #endif
 
 #ifndef noinline

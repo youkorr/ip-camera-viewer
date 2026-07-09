@@ -47,13 +47,13 @@ static inline size_t get_bytes(Edge264GetBits *gb, int nbytes)
 		unsigned three = movemask(x == 3);
 		unsigned stop = test & ~three;
 		if (stop) {
-			int i = __builtin_ctz(stop);
+			int i = ctz32(stop);
 			gb->end = CPB + i - 2;
 			x &= ~shlv128(set8(-1), i);
 		}
 		unsigned mask = (1 << nbytes) - 1;
 		for (unsigned esc = test & three; esc & mask; esc = (esc & (esc - 1)) >> 1) {
-			int i = __builtin_ctz(esc);
+			int i = ctz32(esc);
 			x = shuffle(x, shuf[i]);
 			CPB++;
 		}
