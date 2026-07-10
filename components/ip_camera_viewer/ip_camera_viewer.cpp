@@ -155,6 +155,7 @@ void IPCameraViewer::decode_task_fn_(void *arg) {
     // l'écran n'a pas encore consommé la frame précédente, la frame décodée est
     // simplement abandonnée (le DPB, lui, reste à jour). La latence reste ~0 et
     // c'est le rythme d'affichage qui régule, plus la file d'attente.
+    const int64_t _busy0 = esp_timer_get_time();
     if (cam->fetch_rtp_frame_()) {
       if (cam->decode_h264_to_yuv_()) {
         if (cam->ring_active_()) {
@@ -164,7 +165,9 @@ void IPCameraViewer::decode_task_fn_(void *arg) {
           // les frames les plus fraîches). Convertit dedans puis publie.
           uint8_t *dst = nullptr;
           if (xQueueReceive(cam->ring_free_q_, &dst, 0) != pdTRUE) {
-            if (xQueueReceive(cam->ring_filled_q_, &dst, 0) != pdTRUE)
+            if (xQueueReceive(cam->ring_filled_q_, &dst, 0) == pdTRUE)
+              cam->perf_.drops++;  // frame prête évincée sans avoir été affichée
+            else
               dst = nullptr;  // ne devrait pas arriver (cap couvre tous les buffers)
           }
           if (dst != nullptr) {
@@ -181,10 +184,46 @@ void IPCameraViewer::decode_task_fn_(void *arg) {
             // pour le loopTask après qu'il ait vu decode_frame_ready_ == true.
             cam->decode_frame_ready_.store(true, std::memory_order_release);
           }
+        } else {
+          cam->perf_.drops++;  // décodée mais l'affichage n'a pas consommé la précédente
         }
       }
+      cam->perf_.busy_us += esp_timer_get_time() - _busy0;
     } else {
+      cam->perf_.busy_us += esp_timer_get_time() - _busy0;
       vTaskDelay(pdMS_TO_TICKS(3));
+    }
+
+    // --- Rapport perf : 1 ligne toutes les ~5 s pendant le streaming ----------
+    // Ventile le pipeline étage par étage (les moyennes lissent ce que les logs
+    // par événement ne montrent pas) : fps affiché vs fps caméra, coût IDR vs P,
+    // repack I420->OUYY, conversion RGB565, pertes, rattrapages, charge tâche.
+    {
+      int64_t now_us = esp_timer_get_time();
+      if (cam->perf_.t_start == 0) {
+        cam->perf_.t_start = now_us;
+        cam->perf_.displayed_start = cam->frame_count_;
+      } else if (now_us - cam->perf_.t_start >= 5000000) {
+        PerfWindow &p = cam->perf_;
+        float win_s = (now_us - p.t_start) / 1e6f;
+        uint32_t disp = cam->frame_count_ - p.displayed_start;
+        ESP_LOGI(TAG,
+                 "[perf] disp %.1f fps | cam %.1f fps | IDR n=%u avg %u max %u ms | "
+                 "P n=%u avg %u max %u ms | repack %u ms | conv %u ms | drop %u | "
+                 "catchup %u | task busy %u%%",
+                 disp / win_s, p.frames_assembled / win_s,
+                 p.n_idr, (unsigned) (p.n_idr ? p.dec_idr_us / p.n_idr / 1000 : 0),
+                 (unsigned) (p.dec_idr_max_us / 1000),
+                 p.n_p, (unsigned) (p.n_p ? p.dec_p_us / p.n_p / 1000 : 0),
+                 (unsigned) (p.dec_p_max_us / 1000),
+                 (unsigned) (p.n_repack ? p.repack_us / p.n_repack / 1000 : 0),
+                 (unsigned) (p.n_conv ? p.conv_us / p.n_conv / 1000 : 0),
+                 p.drops, p.catchups,
+                 (unsigned) (p.busy_us * 100 / (now_us - p.t_start)));
+        p = PerfWindow{};
+        p.t_start = now_us;
+        p.displayed_start = cam->frame_count_;
+      }
     }
 #else
     vTaskDelay(pdMS_TO_TICKS(50));
@@ -2253,6 +2292,7 @@ bool IPCameraViewer::fetch_rtp_frame_() {
     if (!this->catchup_skip_to_idr_ && this->catchup_full_ticks_ >= 4) {
       this->catchup_skip_to_idr_ = true;
       this->h264_data_len_ = 0;  // jeter la frame partiellement assemblée
+      this->perf_.catchups++;
       ESP_LOGW(TAG, "Decoder falling behind the camera (socket saturated >2 s) — skipping "
                     "P-frames until the next IDR to stay live.");
     }
@@ -2484,6 +2524,8 @@ bool IPCameraViewer::fetch_rtp_frame_() {
 
       // Add the picture NAL unit itself
       if (this->h264_data_len_ + nal_len + 4 < this->h264_buffer_size_) {
+        if (nal_type == 5)
+          this->frame_is_idr_ = true;  // classement IDR/P du rapport perf
         // Add start code
         this->h264_buffer_[this->h264_data_len_++] = 0x00;
         this->h264_buffer_[this->h264_data_len_++] = 0x00;
@@ -2553,6 +2595,8 @@ bool IPCameraViewer::fetch_rtp_frame_() {
       uint8_t fu_header = nal_data[1];
       bool start = (fu_header >> 7) & 0x01;
       uint8_t fu_type = fu_header & 0x1F;
+      if (start && fu_type == 5)
+        this->frame_is_idr_ = true;  // classement IDR/P du rapport perf
 
       // Latency catch-up: fragments are dropped until an IDR start (FU type 5).
       if (this->catchup_skip_to_idr_) {
@@ -2636,6 +2680,7 @@ bool IPCameraViewer::fetch_rtp_frame_() {
     // Only set frame_complete for actual picture data (not SPS/PPS)
     if (marker && nal_type != 7 && nal_type != 8) {
       frame_complete = true;
+      this->perf_.frames_assembled++;
     }
   }
 
@@ -2682,6 +2727,16 @@ bool IPCameraViewer::decode_h264_to_yuv_() {
     const int64_t _dec_t0 = esp_timer_get_time();
     this->hp_decoder_.decode_annexb(this->h264_buffer_, this->h264_data_len_);
     const int64_t _dec_us = esp_timer_get_time() - _dec_t0;
+    if (this->frame_is_idr_) {
+      this->perf_.n_idr++;
+      this->perf_.dec_idr_us += _dec_us;
+      if (_dec_us > this->perf_.dec_idr_max_us) this->perf_.dec_idr_max_us = _dec_us;
+    } else {
+      this->perf_.n_p++;
+      this->perf_.dec_p_us += _dec_us;
+      if (_dec_us > this->perf_.dec_p_max_us) this->perf_.dec_p_max_us = _dec_us;
+    }
+    this->frame_is_idr_ = false;
     // Seuil 100 ms : ne logge que les IDR et les anomalies. L'ancien seuil de
     // 3 ms loggait CHAQUE P-frame (~15 WARN/s) — le logger UART consommait un
     // temps CPU mesurable ("logger took a long time") et noyait les logs utiles.
@@ -2692,6 +2747,7 @@ bool IPCameraViewer::decode_h264_to_yuv_() {
     this->h264_data_len_ = 0;
 
     bool got = false;
+    const int64_t _rp0 = esp_timer_get_time();
     h264_hp::DecodedFrame f;
     while (this->hp_decoder_.get_frame(&f)) {
       const int sw = f.width & ~1;   // dimensions paires (4:2:0) du flux décodé
@@ -2764,6 +2820,10 @@ bool IPCameraViewer::decode_h264_to_yuv_() {
         got = true;
       }
       this->hp_decoder_.release_frame();
+    }
+    if (got) {
+      this->perf_.repack_us += esp_timer_get_time() - _rp0;
+      this->perf_.n_repack++;
     }
     return got;
   }
@@ -2944,7 +3004,10 @@ bool IPCameraViewer::convert_decoded_(uint8_t *dst) {
   }
   static int64_t cv_acc = 0;
   static uint32_t cv_n = 0;
-  cv_acc += esp_timer_get_time() - _cv0;
+  const int64_t _cv_us = esp_timer_get_time() - _cv0;
+  this->perf_.conv_us += _cv_us;
+  this->perf_.n_conv++;
+  cv_acc += _cv_us;
   if (++cv_n == 64) {
     // DEBUG, not INFO: this fires every ~64 frames (a few times a minute at
     // streaming rate) and the UART logger itself costs CPU time.

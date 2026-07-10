@@ -178,6 +178,28 @@ class IPCameraViewer : public Component {
   std::atomic<bool> decode_task_idle_{true};
   bool pending_shutdown_{false};
 
+  // --- Rapport perf périodique (1 ligne INFO toutes les ~5 s, décodage RTSP) --
+  // Ventile le temps par étage du pipeline pour guider l'optimisation ON-DEVICE
+  // (leçon du round 3 : seuls les chiffres sur cible font foi). Rempli par la
+  // tâche de décodage ; displayed lit frame_count_ (écrit par le loopTask,
+  // lecture 32 bits atomique de fait sur le P4).
+  struct PerfWindow {
+    int64_t t_start{0};                        // µs (esp_timer)
+    int64_t busy_us{0};                        // temps actif de la tâche décodage
+    int64_t dec_idr_us{0}, dec_p_us{0};        // edge264 decode_annexb cumulé
+    int64_t dec_idr_max_us{0}, dec_p_max_us{0};
+    uint32_t n_idr{0}, n_p{0};
+    int64_t repack_us{0};                      // I420 -> OUYY / copie de sortie
+    uint32_t n_repack{0};
+    int64_t conv_us{0};                        // conversion RGB565 (PPA/scalaire)
+    uint32_t n_conv{0};
+    uint32_t frames_assembled{0};              // frames complètes reçues (≈ fps caméra)
+    uint32_t drops{0};                         // décodées mais jamais affichées
+    uint32_t catchups{0};                      // activations du rattrapage
+    uint32_t displayed_start{0};               // frame_count_ au début de fenêtre
+  } perf_;
+  bool frame_is_idr_{false};  // la frame en cours d'assemblage contient une IDR
+
   // --- Tampon de lissage (jitter buffer) — voir set_buffer_frames() -----------
   // Anneau de N+2 buffers RGB565 échangés entre la tâche de décodage (producteur,
   // cœur 1) et le timer d'affichage (consommateur, cœur 0) via deux files
