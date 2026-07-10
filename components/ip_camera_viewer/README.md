@@ -33,8 +33,17 @@ external_components:
       ref: main
     components:
       - ip_camera_viewer
+      - h264_hp
+      - esp_h264
     refresh: 0s
 ```
+
+> **Important — all three components must be listed.** `ip_camera_viewer`
+> auto-loads `h264_hp` (edge264 High Profile decoder) and `esp_h264`
+> (decoder headers), but ESPHome only downloads the components you list
+> under `components:` — with `ip_camera_viewer` alone, the other two are
+> never fetched and the configuration is rejected. Alternatively, omit the
+> `components:` key entirely to fetch every component in the repository.
 
 ### 2. Basic configuration
 
