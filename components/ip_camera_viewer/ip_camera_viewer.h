@@ -47,7 +47,16 @@ class IPCameraViewer : public Component {
   // flux décodé (width_/height_). Étirée EXACTEMENT vers ces dimensions par le
   // PPA matériel (voir ppa_convert_) — pas de préservation automatique du ratio,
   // l'appelant choisit des dimensions cohérentes avec son écran/flux.
-  void set_display_size(uint16_t w, uint16_t h) { this->display_width_ = w; this->display_height_ = h; }
+  void set_display_size(uint16_t w, uint16_t h) {
+    this->display_width_ = w;
+    this->display_height_ = h;
+    // Demande YAML d'origine, conservée telle quelle : display_width_/height_
+    // sont ramenés par init_buffers_ aux dimensions atteignables par le PPA
+    // (pas de 1/16) et re-quantifier depuis des valeurs déjà tronquées ferait
+    // rétrécir l'image d'un cran à chaque réactivation (effet cliquet).
+    this->req_display_width_ = w;
+    this->req_display_height_ = h;
+  }
   void set_update_interval(uint32_t interval_ms) { this->update_interval_ = interval_ms; }
   void set_enabled(bool enabled) { this->enabled_ = enabled; }
   // Si vrai, le switch OFF n'arrête QUE l'affichage (timer LVGL) : la connexion
@@ -94,9 +103,18 @@ class IPCameraViewer : public Component {
   // render_width_()/render_height_() plutôt que ces champs directement.
   uint16_t display_width_{0};
   uint16_t display_height_{0};
+  uint16_t req_display_width_{0};   // demande YAML (voir set_display_size)
+  uint16_t req_display_height_{0};
   uint16_t render_width_() const { return this->display_width_ ? this->display_width_ : this->width_; }
   uint16_t render_height_() const { return this->display_height_ ? this->display_height_ : this->height_; }
   bool resizing_() const { return this->display_width_ != 0; }
+  // Facteurs d'échelle PPA quantifiés, en SEIZIÈMES (le SRM du P4 n'accepte que
+  // des pas de 1/16, tronqués). Fixés par init_buffers_ : display_width_/height_
+  // sont ramenés aux dimensions RÉELLEMENT produites par le PPA, sinon les
+  // lignes/colonnes jamais écrites en bord de canvas alternent entre les résidus
+  // des deux buffers -> bande scintillante en bas. 16 = échelle 1:1.
+  uint16_t ppa_scale16_x_{16};
+  uint16_t ppa_scale16_y_{16};
   bool keep_alive_{false};
   Protocol protocol_{Protocol::MJPEG};
 

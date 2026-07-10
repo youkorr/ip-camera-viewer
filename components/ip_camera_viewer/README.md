@@ -476,6 +476,15 @@ Notes:
 - If the PPA isn't available (init failure, or a runtime SRM error), the
   component logs a warning and falls back to displaying at the stream's
   native resolution rather than risking a corrupted canvas.
+- **The PPA scales in 1/16 steps only** (hardware constraint: 8-bit integer +
+  4-bit fractional factor). If `display_width/display_height` doesn't
+  correspond to an exact `k/16` multiple of the stream size, the component
+  automatically uses the nearest reachable size below and logs the effective
+  output (e.g. stream 640x360 with `display 800x600` → effective 800x585,
+  since 600/360 is not a k/16 ratio). Without this adjustment the
+  never-written strip at the bottom/right of the canvas would flicker.
+  For an exact fit pick sizes like `800x585`, `960x720` (1.5x/2x) or
+  `1280x720` (2x) for a 640x360 stream.
 
 ### Smoothing buffer (`buffer_frames`)
 

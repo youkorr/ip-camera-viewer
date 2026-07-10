@@ -600,13 +600,16 @@ bool IPCameraViewer::ppa_convert_(uint8_t *dst_rgb565) {
   op.out.pic_h = this->render_height_();
   op.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
   op.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
-  // 1.0f when no display_width_/height_ was configured (render_*() falls back
-  // to width_/height_) -> byte-for-byte the previous no-resize behavior.
-  // Otherwise the PPA stretches EXACTLY to render_width_/height_ in the same
-  // hardware pass as the color conversion: no separate resize step, and no
-  // aspect-ratio correction — the caller picked these dimensions on purpose.
-  op.scale_x = (float) this->render_width_() / (float) this->width_;
-  op.scale_y = (float) this->render_height_() / (float) this->height_;
+  // Facteur d'échelle QUANTIFIÉ (seizièmes, voir init_buffers_) plutôt que le
+  // ratio render/stream : le driver refait floor(scale*16), et un ratio calculé
+  // depuis des dimensions déjà tronquées peut retomber un cran EN DESSOUS
+  // (ex. 585/360 -> 25,99/16 -> 25) et laisser à nouveau des lignes jamais
+  // écrites en bas du canvas. n/16.0f est exact en float -> le driver retrouve
+  // exactement n. 16/16 = 1.0 quand le resize est inactif (comportement
+  // historique inchangé). Étirement exact, pas de correction de ratio — choix
+  // délibéré de l'utilisateur.
+  op.scale_x = (float) this->ppa_scale16_x_ / 16.0f;
+  op.scale_y = (float) this->ppa_scale16_y_ / 16.0f;
   op.mode = PPA_TRANS_MODE_BLOCKING;  // le DMA travaille, la tâche dort
   esp_err_t err = ppa_do_scale_rotate_mirror((ppa_client_handle_t) this->ppa_client_, &op);
   if (err != ESP_OK) {
@@ -637,6 +640,41 @@ bool IPCameraViewer::ppa_convert_(uint8_t *dst_rgb565) {
 
 bool IPCameraViewer::init_buffers_() {
   // ESP32-P4 JPEG decoder requires dimensions to be 16-byte aligned
+  // Quantification PPA du resize. Le SRM du P4 n'accepte que des facteurs
+  // d'échelle en PAS DE 1/16 (8 bits entiers + 4 bits fractionnaires, tronqués),
+  // et sa taille de sortie réelle = int*dim + frac*dim/16 (divisions ENTIÈRES,
+  // même formule que le driver esp_driver_ppa). Si display_width/height ne
+  // correspond pas à un facteur atteignable, le PPA écrit MOINS de lignes/
+  // colonnes que le canvas n'en lit : la bande jamais écrite (en bas/à droite)
+  // alterne entre les résidus des deux buffers -> bande scintillante. On ramène
+  // donc display_width_/height_ aux dimensions RÉELLEMENT produites, et
+  // ppa_convert_ utilisera exactement ce facteur quantifié.
+  if (this->resizing_() && this->width_ > 0 && this->height_ > 0) {
+    // Toujours quantifier depuis la demande YAML D'ORIGINE (req_display_*) :
+    // repartir des dimensions effectives déjà tronquées referait descendre d'un
+    // cran de 1/16 à chaque réactivation du switch (effet cliquet).
+    uint32_t s16x = ((uint32_t) this->req_display_width_ * 16) / this->width_;
+    uint32_t s16y = ((uint32_t) this->req_display_height_ * 16) / this->height_;
+    if (s16x < 1) s16x = 1;
+    if (s16y < 1) s16y = 1;
+    uint16_t eff_w = (uint16_t) ((s16x / 16) * this->width_ + (s16x % 16) * this->width_ / 16);
+    uint16_t eff_h = (uint16_t) ((s16y / 16) * this->height_ + (s16y % 16) * this->height_ / 16);
+    if (eff_w != this->req_display_width_ || eff_h != this->req_display_height_) {
+      ESP_LOGW(TAG, "display %ux%u is not reachable with the PPA's 1/16-step scaling from "
+                    "%ux%u — using the effective output %ux%u (pick a display size that is "
+                    "a k/16 multiple of the stream size for an exact fit).",
+               this->req_display_width_, this->req_display_height_, this->width_,
+               this->height_, eff_w, eff_h);
+    }
+    this->display_width_ = eff_w;
+    this->display_height_ = eff_h;
+    this->ppa_scale16_x_ = (uint16_t) s16x;
+    this->ppa_scale16_y_ = (uint16_t) s16y;
+  } else {
+    this->ppa_scale16_x_ = 16;
+    this->ppa_scale16_y_ = 16;
+  }
+
   // Round up to nearest multiple of 16
   // RGB565/canvas buffers are sized on the RENDER resolution (render_width_/
   // height_), which equals width_/height_ unless display_width_/height_ was
@@ -666,6 +704,11 @@ bool IPCameraViewer::init_buffers_() {
     ESP_LOGE(TAG, "Failed to allocate aligned RGB565 buffers (%u bytes each)", this->rgb565_buffer_size_);
     return false;
   }
+  // Noircir une fois : toute zone que le producteur n'écrirait pas (bord de
+  // quantification PPA, letterbox, premier affichage avant la première frame)
+  // est un noir stable au lieu d'un résidu PSRAM qui alterne entre les buffers.
+  memset(this->rgb565_buffer_a_, 0, this->rgb565_buffer_size_);
+  memset(this->rgb565_buffer_b_, 0, this->rgb565_buffer_size_);
 
   ESP_LOGI(TAG, "Allocated 64-byte aligned RGB565 buffers in SPIRAM: %u bytes each", this->rgb565_buffer_size_);
 
@@ -839,7 +882,9 @@ bool IPCameraViewer::init_frame_ring_() {
       this->free_frame_ring_();
       return false;
     }
-    // Tous les buffers commencent LIBRES.
+    // Tous les buffers commencent LIBRES (et noirs — voir le memset des
+    // buffers a_/b_ : mêmes raisons, bords de quantification PPA/letterbox).
+    memset(this->ring_buf_[i], 0, this->rgb565_buffer_size_);
     xQueueSend(this->ring_free_q_, &this->ring_buf_[i], 0);
   }
   this->ring_display_buf_ = nullptr;
