@@ -243,6 +243,12 @@ class IPCameraViewer : public Component {
   // paquet). On envoie un GET_PARAMETER toutes les 15 s pour garder la session.
   uint32_t last_keepalive_{0};
   bool rtsp_keepalive_enabled_{true};  // voir set_rtsp_keepalive()
+  // Watchdog de famine RTP : millis() du dernier octet reçu. Une session peut
+  // mourir côté caméra SANS erreur socket (recv() -> EAGAIN pour toujours,
+  // compteurs figés) ; après 10 s sans le moindre octet on ferme et on marque
+  // le flux déconnecté pour que loop() se reconnecte (y compris en plein
+  // affichage — voir le bloc de reconnexion mi-session dans loop()).
+  uint32_t last_rx_data_{0};
   std::string rtsp_auth_{};  // Base64 encoded credentials (Basic auth)
   std::string rtsp_user_{};  // Username (for Digest auth)
   std::string rtsp_pass_{};  // Password (for Digest auth)

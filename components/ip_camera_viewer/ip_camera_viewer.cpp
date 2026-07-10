@@ -212,6 +212,37 @@ void IPCameraViewer::loop() {
     ESP_LOGE(TAG, "Failed to create LVGL timer");
   }
 
+  // Mid-session reconnect: the "start" block below only runs while the display
+  // timer does NOT exist, so a stream that died WHILE displaying (camera-side
+  // session drop — see the RTP starvation watchdog in fetch_rtp_frame_) was
+  // never reconnected: the timer kept firing on a dead stream and the screen
+  // froze forever. Reconnect here, keeping the timer/buffers/decoder alive —
+  // the decode task idles while stream_connected_ is false and resumes as soon
+  // as the new session delivers data (catch-up re-syncs on the next IDR).
+  if (this->enabled_ && this->lvgl_timer_ != nullptr && this->protocol_ == Protocol::RTSP &&
+      !this->stream_connected_ && this->rtsp_socket_ < 0) {
+    uint32_t now = millis();
+    auto *wifi_c = wifi::global_wifi_component;
+    if (wifi_c != nullptr && wifi_c->is_connected() &&
+        (this->last_connection_attempt_ == 0 ||
+         (now - this->last_connection_attempt_) >= this->connection_retry_delay_)) {
+      this->last_connection_attempt_ = now;
+      this->connection_attempts_++;
+      ESP_LOGW(TAG, "Stream lost while displaying — reconnecting (attempt %u)...",
+               this->connection_attempts_);
+      if (this->connect_rtsp_stream_()) {
+        this->connection_attempts_ = 0;
+        this->pending_shutdown_ = false;
+        this->decode_run_.store(true);
+        ESP_LOGI(TAG, "Stream re-established.");
+      } else {
+        ESP_LOGW(TAG, "Reconnect failed — retrying in %u s.",
+                 this->connection_retry_delay_ / 1000);
+      }
+    }
+    return;
+  }
+
   // Start timer when enabled
   if (this->enabled_ && this->lvgl_timer_ == nullptr) {
     uint32_t now = millis();
@@ -1863,9 +1894,18 @@ bool IPCameraViewer::connect_rtsp_stream_() {
   flags = fcntl(this->rtsp_socket_, F_GETFL, 0);
   fcntl(this->rtsp_socket_, F_SETFL, flags | O_NONBLOCK);
 
+  // (Re)connexion : purger l'état d'une éventuelle session morte — un fragment
+  // '$' partiel résiduel dans rtp_acc_ désynchroniserait le framing du nouveau
+  // flux, et une access unit à moitié assemblée corromprait la première frame.
+  this->rtp_acc_len_ = 0;
+  this->h264_data_len_ = 0;
+  this->catchup_skip_to_idr_ = false;
+  this->catchup_full_ticks_ = 0;
   this->stream_connected_ = true;
-  // Armer le keepalive : premier "ping" ~15 s après le PLAY (bien avant les ~30 s
-  // d'inactivité qui font expirer la session côté caméra).
+  // Armer le watchdog de famine RTP et le keepalive : premier "ping" ~15 s après
+  // le PLAY (bien avant les ~30 s d'inactivité qui font expirer la session côté
+  // caméra).
+  this->last_rx_data_ = millis();
   this->last_keepalive_ = millis();
   ESP_LOGI(TAG, "RTSP stream connected (TCP interleaved)");
 
@@ -2208,8 +2248,24 @@ bool IPCameraViewer::fetch_rtp_frame_() {
                          sizeof(this->rtp_acc_) - this->rtp_acc_len_, 0);
       if (len > 0) {
         this->rtp_acc_len_ += (size_t) len;
+        this->last_rx_data_ = millis();
       } else if (len < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
         d_eagain++;  // no new data this tick
+        // Starvation watchdog. A live camera pushes RTP continuously; ZERO bytes
+        // for 10 s straight (despite the periodic keepalive) means the session
+        // silently died camera-side — the TCP socket stays "open" so recv() just
+        // returns EAGAIN forever and no error path ever fires (observed on
+        // device: pkts/bytes counters frozen for minutes). Declare the stream
+        // dead so the reconnect logic in loop() can re-establish it.
+        if (this->last_rx_data_ != 0 && (millis() - this->last_rx_data_) > 10000) {
+          ESP_LOGW(TAG, "No RTP data for 10 s (session died camera-side?) — closing the "
+                        "socket and reconnecting.");
+          close(this->rtsp_socket_);
+          this->rtsp_socket_ = -1;
+          this->stream_connected_ = false;
+          this->last_rx_data_ = 0;
+          return false;
+        }
       } else {
         // Socket genuinely dead (closed by peer, reset, ...). Close it and
         // mark disconnected so the NEXT enable properly reconnects instead of
