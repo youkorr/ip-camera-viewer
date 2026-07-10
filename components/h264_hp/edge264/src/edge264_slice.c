@@ -367,7 +367,7 @@
 			}
 		
 			// store in transposed scan position
-			int i = 63 - clz64(significant_coeff_flags);
+			int i = 63 - __builtin_clzll(significant_coeff_flags);
 			ctx->c[ctx->scan[i]] = coeff_level;
 			significant_coeff_flags &= ~((uint64_t)1 << i);
 		} while (significant_coeff_flags != 0);
@@ -1062,7 +1062,7 @@ static noinline void CAFUNC(parse_ref_idx, unsigned f) {
 	mb->refIdx_l = ((i64x2){mb->refIdx_l} & ~(i64x2)((v & bits) == bits))[0]; // set to 0 if parsed
 	log_mb(ctx, "%sref_idx: {", ctx->log_indent);
 	for (unsigned u = f & ctx->num_ref_idx_mask; u; u &= u - 1) {
-		int i = ctz32(u);
+		int i = __builtin_ctz(u);
 		int ref_idx = 0;
 		#if !CABAC
 			if (ctx->clip_ref_idx[i] == 1)
@@ -1224,7 +1224,7 @@ static void CAFUNC(parse_B_sub_mb) {
 	// loop on mvs
 	log_mb(ctx, "%smvds: [", ctx->log_indent);
 	do {
-		int i = ctz32(mvd_flags);
+		int i = __builtin_ctz(mvd_flags);
 		int i4x4 = i & 15;
 		mb->mvs_s[i] = 0; // value pointed to when A/B/C/D are unavailable
 		uint8_t *absMvd_p = mb->absMvd + (i & 16) * 2;
@@ -1501,7 +1501,7 @@ static void CAFUNC(parse_P_sub_mb, unsigned ref_idx_flags)
 	// loop on mvs
 	log_mb(ctx, "%smvds: [", ctx->log_indent);
 	do {
-		int i = ctz32(mvd_flags);
+		int i = __builtin_ctz(mvd_flags);
 		i16x8 mvd = CACALL(parse_mvd_pair, mb->absMvd, i);
 		
 		// branch on equality mask

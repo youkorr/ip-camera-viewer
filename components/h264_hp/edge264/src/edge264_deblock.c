@@ -1220,54 +1220,6 @@ static noinline void deblock_mb(Edge264Context *ctx)
 			return;
 		}
 	}
-#ifdef __riscv
-	// Scalar setup for INTRA macroblocks. The generic vector setup below
-	// (avgu8/max8/minu8 + three 48-byte shuffle3 lookups) scalarizes into
-	// several hundred byte operations on SIMD-less RISC-V, and on IDR frames
-	// EVERY macroblock pays it. Intra needs none of the bS machinery: alpha,
-	// beta and tC0 depend only on the three QP pairs (mid/A/B) and the filter
-	// offsets, so compute the exact same 16-byte vectors with ~100 scalar ops.
-	// Byte-identical to the vector path, including the CLANG-backend shuffle
-	// semantics (index & 15, so the -1 lanes of tC0_v[2] read tC03[15], NOT 0
-	// as x86 pshufb would; those lanes are not read by the pixel filters).
-	if (!mb->mbIsInterFlag) {
-		uint8_t qav[16];
-		const uint8_t *qm = (const uint8_t *)&mb->QP_s;   // {QPy, QPcb, QPcr, pad}
-		const uint8_t *qa = (const uint8_t *)&mbA->QP_s;
-		const uint8_t *qb = (const uint8_t *)&mbB->QP_s;
-		for (int i = 0; i < 4; i++) {
-			qav[i] = qav[i + 4] = qm[i];
-			qav[i + 8] = (qm[i] + qa[i] + 1) >> 1;
-			qav[i + 12] = (qm[i] + qb[i] + 1) >> 1;
-		}
-		const int offA = ctx->t.FilterOffsetA, offB = ctx->t.FilterOffsetB;
-		const uint8_t *alpha48 = (const uint8_t *)idx2alpha;
-		const uint8_t *beta48 = (const uint8_t *)idx2beta;
-		const int8_t *tC048 = (const int8_t *)idx2tC0[2];
-		uint8_t *alpha = (uint8_t *)&ctx->alpha_v;
-		uint8_t *beta = (uint8_t *)&ctx->beta_v;
-		int8_t tC03[16];
-		for (int i = 0; i < 16; i++) {
-			int ia = qav[i] + offA;
-			ia = ia < 0 ? 0 : (ia > 51 ? 51 : ia);
-			int ib = qav[i] + offB;
-			ib = ib < 0 ? 0 : (ib > 51 ? 51 : ib);
-			int a4 = ia < 4 ? 0 : ia - 4;
-			alpha[i] = alpha48[a4];
-			beta[i] = beta48[ib < 4 ? 0 : ib - 4];
-			tC03[i] = tC048[a4];
-		}
-		ctx->tC0_v[0] = ctx->tC0_v[1] = set8(tC03[0]);
-		i8x16 t2;
-		int8_t *p2 = (int8_t *)&t2;
-		for (int i = 0; i < 8; i++) p2[i] = tC03[15];
-		for (int i = 8; i < 12; i++) p2[i] = tC03[1];
-		for (int i = 12; i < 16; i++) p2[i] = tC03[2];
-		ctx->tC0_v[2] = ctx->tC0_v[3] = t2;
-		deblock_mb_scalar_pixels(ctx);
-		return;
-	}
-#endif
 	i8x16 zero = {};
 	i8x16 qP = set32((int32_t)mb->QP_s);
 	i32x4 qPAB = {(int32_t)mbA->QP_s, (int32_t)mbB->QP_s};

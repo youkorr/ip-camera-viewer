@@ -416,12 +416,12 @@ static always_inline void decode_direct_spatial_mv_pred(Edge264Context *ctx, uns
 			static const int8_t heights[8] = {16, 8, 16, 8, 4, 4, 8, 4};
 			uint64_t inter_eqs = 0;
 			do {
-				int i = ctz32(mvd_flags);
+				int i = __builtin_ctz(mvd_flags);
 				unsigned t = mvd_flags >> i & scopes[i & 15];
 				unsigned c = colZeroFlags >> i;
 				i16x8 mt = (u16x8){t, t, t, t, t, t, t, t} & masks;
 				i16x8 mc = (u16x8){c, c, c, c, c, c, c, c};
-				int type = ctz32(movemask(((mt & mc) == masks) | ((mt & ~mc) == masks))) >> 1;
+				int type = __builtin_ctz(movemask(((mt & mc) == masks) | ((mt & ~mc) == masks))) >> 1;
 				mvd_flags ^= (unsigned)((uint16_t *)&masks)[type] << i;
 				inter_eqs |= (uint64_t)eqs[type] << i * 2;
 				decode_inter(ctx, i, widths[type], heights[type]);
@@ -506,7 +506,7 @@ static always_inline void decode_direct_temporal_mv_pred(Edge264Context *ctx, un
 		static uint16_t masks[16] = {0x1, 0x3, 0x5, 0xf, 0x1, 0x33, 0x5, 0xff, 0x1, 0x3, 0x0505, 0x0f0f, 0x1, 0x33, 0x0505, 0xffff};
 		static int8_t widths[16] = {4, 8, 4, 8, 4, 16, 4, 16, 4, 8, 4, 8, 4, 16, 4, 16};
 		static int8_t heights[16] = {4, 4, 8, 8, 4, 4, 8, 8, 4, 4, 16, 16, 4, 4, 16, 16};
-		int i = ctz32(direct_flags);
+		int i = __builtin_ctz(direct_flags);
 		int type = extract_neighbours(inter_eqs >> i * 2) & ~i;
 		direct_flags ^= masks[type] << i;
 		decode_inter(ctx, i, widths[type], heights[type]);
