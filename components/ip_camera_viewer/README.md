@@ -626,6 +626,68 @@ id(security_cam_1).configure_canvas(canvas);
 bool is_running = id(security_cam_1).is_enabled();
 ```
 
+## Performance tuning (ESP32-P4, RTSP/H.264)
+
+On-device measurements show H.264 decode on the P4 is **memory-bound, not
+CPU-bound**: motion compensation and deblocking constantly read/write the
+frame buffers in PSRAM, competing with the display (MIPI-DSI scanout, LVGL
+rendering, PPA) for the same bandwidth. The two levers below attack exactly
+that — they are worth trying before anything else.
+
+### 1. Bigger L2 cache (sdkconfig)
+
+The P4's L2 cache (through which ALL PSRAM traffic goes) defaults to 128 KB —
+far smaller than one 640x360 video frame (~345 KB), so reference-frame reads
+miss constantly. Espressif's own PSRAM-performance guidance recommends
+raising it:
+
+```yaml
+esp32:
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_CACHE_L2_CACHE_256KB: y      # or CONFIG_CACHE_L2_CACHE_512KB if internal RAM allows
+      CONFIG_CACHE_L2_CACHE_LINE_128B: y
+      CONFIG_COMPILER_OPTIMIZATION_PERF: y
+```
+
+Trade-off: the L2 cache is carved out of the 768 KB internal L2MEM. 256 KB is
+safe; 512 KB fits a whole reference luma plane (biggest win) but leaves only
+~256 KB of internal RAM — check that WiFi buffers and the decode task stack
+still fit (watch for allocation failures at boot).
+
+Also make sure PSRAM runs at its maximum: `psram: { mode: hex, speed: 200MHz }`
+on boards wired for hex mode (16-line). Quad/older settings halve the
+bandwidth the decoder lives on.
+
+### 2. Re-encode the stream on your server (go2rtc/Frigate)
+
+If you already run go2rtc (as for the MJPEG option), you can hand it the
+camera's High-profile stream and serve the ESP32 a cheaper one. This stacks
+several wins in one place — measured on the edge264 bench, Baseline/CAVLC
+alone decodes ~18% faster than High/CABAC at equal bitrate, and the GOP/fps
+settings multiply that:
+
+```yaml
+# go2rtc.yaml
+streams:
+  tapo_esp32:
+    - rtsp://user:pass@192.168.1.13:554/stream2
+    - "ffmpeg:tapo_esp32#video=h264#raw=-c:v libx264 -profile:v baseline -preset ultrafast -tune zerolatency -r 10 -g 40 -b:v 600k"
+```
+
+- `-profile:v baseline`: no CABAC, no 8x8 transform — cheaper entropy decode
+- `-r 10`: 10 fps gives the decoder comfortable headroom (10 smooth fps beat
+  15 stuttering ones)
+- `-g 40`: 4 s keyframe interval — 4x fewer expensive IDR stalls, and the
+  latency catch-up recovers quickly when it does trigger
+- `-b:v 600k`: bounded bitrate keeps worst-case (motion) P-frames small
+
+Then point the ESP32 at `rtsp://<server>:8554/tapo_esp32`. The transcode
+costs a slice of server CPU (negligible at 640x360@10) and the ESP32 side
+needs no change at all. This is the single most effective way to get smooth
+motion if your camera doesn't expose keyframe-interval/fps settings.
+
 ## Technical details
 
 ### Applied fixes
