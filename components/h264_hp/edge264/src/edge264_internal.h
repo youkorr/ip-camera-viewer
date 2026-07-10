@@ -459,16 +459,7 @@ typedef struct Edge264Decoder {
 	// 256-byte LUT (~8 instructions); ctz = de Bruijn multiply + 32-byte LUT
 	// (~6 instructions, M extension is always present). Same non-zero-input
 	// contract as the builtins; bit-exactness is covered by the QEMU harness.
-	//
-	// FORCED into .data (= internal DRAM on ESP-IDF): on ESP32-P4 (XIP), const
-	// .rodata lives in flash behind the flash cache, which the OTHER core's code
-	// fetches (LVGL rendering) evict constantly — a per-bin table load could
-	// then cost a ~100-cycle flash-cache refill, slower than the ALU-only
-	// emulation it replaces. .data guarantees 1-2 cycle DRAM loads immune to
-	// flash-cache pressure, for 288 bytes of DRAM. Dropping const alone is not
-	// enough: the compiler proves the array is never written and moves it back
-	// to .rodata, hence the explicit section attribute. Never actually written.
-	__attribute__((section(".data"))) static uint8_t _e264_clz8_lut[256] = {
+	static const uint8_t _e264_clz8_lut[256] = {
 		8, 7, 6, 6, 5, 5, 5, 5, 4, 4, 4, 4, 4, 4, 4, 4,
 		3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 		2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
@@ -486,7 +477,7 @@ typedef struct Edge264Decoder {
 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	};
-	__attribute__((section(".data"))) static uint8_t _e264_debruijn_ctz[32] = {
+	static const uint8_t _e264_debruijn_ctz[32] = {
 		 0,  1, 28,  2, 29, 14, 24,  3, 30, 22, 20, 15, 25, 17,  4,  8,
 		31, 27, 13, 23, 21, 19, 16,  7, 26, 12, 18,  6, 11,  5, 10,  9,
 	};
