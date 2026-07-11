@@ -2759,6 +2759,16 @@ bool IPCameraViewer::decode_h264_to_yuv_() {
         // équivalent). Lignes paires "U Y Y...", impaires "V Y Y..." (format
         // YUV420 matériel du P4). La conversion RGB565 sera faite par le PPA.
         const size_t line3 = (size_t) this->width_ * 3 / 2;
+        // Repack en MOTS 32 bits. L'ancienne boucle écrivait la PSRAM octet par
+        // octet (6 stores par paire de pixels) : le rapport [perf] la mesurait à
+        // ~36 ms/frame — presque le coût d'un décodage P entier. Ici, 8 pixels
+        // d'une ligne = 12 octets de sortie = 3 stores 32 bits, soit 4x moins
+        // d'opérations PSRAM. Exige l'alignement 4 des plans/strides (vrai en
+        // pratique pour le DPB edge264, vérifié à chaque frame) ; repli octet
+        // sinon et pour un éventuel reste de ligne (sw non multiple de 8).
+        const bool w32 = (((uintptr_t) f.y | (uintptr_t) f.cb | (uintptr_t) f.cr |
+                           (uintptr_t) f.stride_y | (uintptr_t) f.stride_c |
+                           (uintptr_t) this->ouyy_buffer_ | (uintptr_t) line3) & 3) == 0;
         for (int row = 0; row < sh; row += 2) {
           const uint8_t *y0 = f.y + (size_t) row * f.stride_y;
           const uint8_t *y1 = y0 + f.stride_y;
@@ -2766,7 +2776,32 @@ bool IPCameraViewer::decode_h264_to_yuv_() {
           const uint8_t *v = f.cr + (size_t) (row >> 1) * f.stride_c;
           uint8_t *o0 = this->ouyy_buffer_ + (size_t) row * line3;
           uint8_t *o1 = o0 + line3;
-          for (int x = 0, c = 0; x < sw; x += 2, c++) {
+          int x = 0, c = 0;
+          if (w32) {
+            uint32_t *p0 = (uint32_t *) o0;
+            uint32_t *p1 = (uint32_t *) o1;
+            for (; x + 8 <= sw; x += 8, c += 4) {
+              // Ligne paire : [u0 y0 y1][u1 y2 y3][u2 y4 y5][u3 y6 y7] (LE)
+              uint32_t ya = *(const uint32_t *) (y0 + x);
+              uint32_t yb = *(const uint32_t *) (y0 + x + 4);
+              uint32_t uc = *(const uint32_t *) (u + c);
+              p0[0] = (uc & 0xFF) | (ya & 0xFF) << 8 | (ya & 0xFF00) << 8 | (uc & 0xFF00) << 16;
+              p0[1] = (ya >> 16 & 0xFF) | (ya >> 24) << 8 | (uc >> 16 & 0xFF) << 16 | (yb & 0xFF) << 24;
+              p0[2] = (yb >> 8 & 0xFF) | (uc >> 24) << 8 | (yb >> 16 & 0xFF) << 16 | (yb >> 24) << 24;
+              p0 += 3;
+              // Ligne impaire : idem avec V
+              ya = *(const uint32_t *) (y1 + x);
+              yb = *(const uint32_t *) (y1 + x + 4);
+              uc = *(const uint32_t *) (v + c);
+              p1[0] = (uc & 0xFF) | (ya & 0xFF) << 8 | (ya & 0xFF00) << 8 | (uc & 0xFF00) << 16;
+              p1[1] = (ya >> 16 & 0xFF) | (ya >> 24) << 8 | (uc >> 16 & 0xFF) << 16 | (yb & 0xFF) << 24;
+              p1[2] = (yb >> 8 & 0xFF) | (uc >> 24) << 8 | (yb >> 16 & 0xFF) << 16 | (yb >> 24) << 24;
+              p1 += 3;
+            }
+            o0 = (uint8_t *) p0;
+            o1 = (uint8_t *) p1;
+          }
+          for (; x < sw; x += 2, c++) {
             *o0++ = u[c];
             *o0++ = y0[x];
             *o0++ = y0[x + 1];
