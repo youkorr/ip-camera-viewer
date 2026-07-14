@@ -1298,11 +1298,12 @@ bool IPCameraViewer::fetch_jpeg_frame_() {
 size_t IPCameraViewer::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
   if (len < 4) return len;
 
-  // DEBUG: Disabled to reduce log verbosity
-  // Enable by changing debug_markers = true for troubleshooting
+  // DEBUG: log the full marker breakdown for the FIRST 3 frames only (then quiet),
+  // so we can see exactly what ffmpeg emits and what the stripper keeps/removes —
+  // decisive when the P4 hardware decoder rejects a marker we thought we stripped.
   static uint32_t jpeg_count = 0;
   jpeg_count++;
-  bool debug_markers = false;  // Set to true to enable marker debugging
+  bool debug_markers = (jpeg_count <= 3);
 
   size_t write_pos = 0;
   size_t read_pos = 0;
@@ -1588,6 +1589,34 @@ bool IPCameraViewer::decode_jpeg_to_rgb565_() {
       this->jpeg_buffer_[this->jpeg_data_len_ - 2] != 0xFF ||
       this->jpeg_buffer_[this->jpeg_data_len_ - 1] != 0xD9) {
     return false;  // Corrupted JPEG - skip silently
+  }
+
+  // DIAG (3 premières frames) : dump des premiers/derniers octets du JPEG NETTOYÉ,
+  // exactement ce que le décodeur matériel reçoit. Révèle un marqueur qui aurait
+  // survécu au stripper, ou une structure d'en-tête inattendue.
+  static uint32_t dbg_dump = 0;
+  if (dbg_dump < 3) {
+    dbg_dump++;
+    char head[3 * 32 + 1];
+    size_t nh = this->jpeg_data_len_ < 32 ? this->jpeg_data_len_ : 32;
+    for (size_t i = 0; i < nh; i++) sprintf(head + i * 3, "%02X ", this->jpeg_buffer_[i]);
+    ESP_LOGI(TAG, "JPEG cleaned (%u B) head: %s", (unsigned) this->jpeg_data_len_, head);
+    // Scanne l'en-tête (hors scan data) pour lister tous les marqueurs restants.
+    char mk[128] = {0};
+    size_t p = 2, mn = 0;
+    while (p + 1 < this->jpeg_data_len_ && mn < 20) {
+      if (this->jpeg_buffer_[p] != 0xFF) { p++; continue; }
+      uint8_t m = this->jpeg_buffer_[p + 1];
+      char tmp[8];
+      sprintf(tmp, "%02X ", m);
+      strncat(mk, tmp, sizeof(mk) - strlen(mk) - 1);
+      mn++;
+      if (m == 0xDA) break;  // SOS -> le reste est du scan data
+      if (m == 0x00 || (m >= 0xD0 && m <= 0xD9)) { p += 2; continue; }
+      uint16_t ln = (this->jpeg_buffer_[p + 2] << 8) | this->jpeg_buffer_[p + 3];
+      p += 2 + ln;
+    }
+    ESP_LOGI(TAG, "JPEG markers (header): %s", mk);
   }
 
   jpeg_decode_cfg_t decode_cfg = {
