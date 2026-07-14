@@ -1523,6 +1523,74 @@ size_t IPCameraViewer::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
   return write_pos;
 }
 
+size_t IPCameraViewer::reorder_jpeg_canonical_(uint8_t *data, size_t len) {
+  // Le décodeur JPEG matériel du P4 attend l'ordre canonique et un en-tête JFIF.
+  // ffmpeg brut (via go2rtc) émet DQT, DHT, SOF0, SOS (DHT avant SOF0) et SANS
+  // APP0 -> "marker not supported". On reconstruit : SOI, APP0(JFIF), DQT(*),
+  // SOF0, DHT(*), puis SOS..EOI verbatim. Les segments d'en-tête (quelques
+  // centaines d'octets) sont copiés dans un tampon local, la charge utile SOS
+  // (l'essentiel) est juste décalée de la taille ajoutée -> pas de gros memcpy.
+  if (len < 4 || data[0] != 0xFF || data[1] != 0xD8)
+    return len;  // pas un JPEG -> laisser tel quel
+
+  // 1) Localiser SOS (début du scan data ; tout ce qui suit est copié verbatim).
+  size_t sos = 0;
+  for (size_t p = 2; p + 3 < len;) {
+    if (data[p] != 0xFF) { p++; continue; }
+    uint8_t m = data[p + 1];
+    if (m == 0xDA) { sos = p; break; }
+    if (m == 0xD9) break;                                   // EOI avant SOS : anormal
+    if (m == 0x01 || (m >= 0xD0 && m <= 0xD7)) { p += 2; continue; }  // marqueurs sans longueur
+    p += 2 + ((data[p + 2] << 8) | data[p + 3]);
+  }
+  if (sos == 0 || sos > 900)
+    return len;  // structure inattendue ou en-tête énorme -> ne pas risquer, laisser tel quel
+
+  // 2) Déjà canonique (APP0 en 2e marqueur ET SOF0 avant DHT) ? Ne rien faire.
+  bool has_app0 = (data[2] == 0xFF && data[3] == 0xE0);
+  size_t sof_pos = 0, dht_pos = 0;
+  for (size_t p = 2; p < sos;) {
+    if (data[p] != 0xFF) { p++; continue; }
+    uint8_t m = data[p + 1];
+    if (m == 0xC0 && !sof_pos) sof_pos = p;
+    if (m == 0xC4 && !dht_pos) dht_pos = p;
+    p += 2 + ((data[p + 2] << 8) | data[p + 3]);
+  }
+  if (has_app0 && sof_pos && dht_pos && sof_pos < dht_pos)
+    return len;  // rien à faire
+
+  // 3) Construire le nouvel en-tête dans un tampon local.
+  static const uint8_t kApp0[] = {0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00,
+                                  0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00};
+  uint8_t hdr[1024];
+  size_t h = 0;
+  hdr[h++] = 0xFF; hdr[h++] = 0xD8;                          // SOI
+  memcpy(hdr + h, kApp0, sizeof(kApp0)); h += sizeof(kApp0); // APP0 JFIF
+  // Ordre : tous les DQT, puis SOF0, puis tous les DHT.
+  for (uint8_t want : {(uint8_t) 0xDB, (uint8_t) 0xC0, (uint8_t) 0xC4}) {
+    for (size_t p = 2; p < sos;) {
+      if (data[p] != 0xFF) { p++; continue; }
+      uint8_t m = data[p + 1];
+      size_t seg = 2 + ((data[p + 2] << 8) | data[p + 3]);
+      if (m == want) {
+        if (h + seg > sizeof(hdr))
+          return len;  // en-tête anormalement gros -> abandon sûr
+        memcpy(hdr + h, data + p, seg);
+        h += seg;
+      }
+      p += seg;
+    }
+  }
+
+  // 4) Assembler : [nouvel en-tête h octets] + [SOS..fin (len-sos octets)].
+  size_t tail = len - sos;
+  if (h + tail > this->jpeg_buffer_size_)
+    return len;  // ne tiendrait pas dans jpeg_buffer_ -> laisser l'original
+  memmove(data + h, data + sos, tail);  // décale la charge utile (dest > src, sûr)
+  memcpy(data, hdr, h);
+  return h + tail;
+}
+
 size_t IPCameraViewer::strip_jpeg_restart_markers_(uint8_t *data, size_t len) {
   // This function is now integrated into strip_jpeg_com_markers_
   // Keep for compatibility but it does nothing
@@ -1582,6 +1650,11 @@ bool IPCameraViewer::decode_jpeg_to_rgb565_() {
   }
 
   this->jpeg_data_len_ = cleaned_len;
+
+  // Réordonner en JPEG canonique (SOI, APP0, DQT, SOF0, DHT, SOS) : le décodeur
+  // JPEG matériel du P4 refuse la disposition brute de ffmpeg (DHT avant SOF0,
+  // sans JFIF) avec "marker not supported". No-op si déjà canonique.
+  this->jpeg_data_len_ = this->reorder_jpeg_canonical_(this->jpeg_buffer_, this->jpeg_data_len_);
 
   // Validate we still have a valid JPEG after cleanup (silent)
   if (this->jpeg_data_len_ < 4 ||

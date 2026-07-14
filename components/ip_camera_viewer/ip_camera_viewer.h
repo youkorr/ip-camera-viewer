@@ -363,6 +363,11 @@ class IPCameraViewer : public Component {
   bool fetch_jpeg_frame_();
   size_t strip_jpeg_com_markers_(uint8_t *data, size_t len);  // Strip COM markers from JPEG
   size_t strip_jpeg_restart_markers_(uint8_t *data, size_t len);  // Strip RST markers (unsupported by hardware)
+  // Réordonne l'en-tête JPEG dans l'ordre canonique SOI, APP0(JFIF), DQT, SOF0,
+  // DHT, SOS et injecte un APP0 JFIF absent. ffmpeg (go2rtc) émet DHT AVANT SOF0
+  // et sans JFIF ; le décodeur JPEG matériel du P4 rejette cette disposition
+  // ("marker not supported"). Transformation en place (in-place) dans data.
+  size_t reorder_jpeg_canonical_(uint8_t *data, size_t len);
   bool decode_jpeg_to_rgb565_();
 
   // RTSP methods
