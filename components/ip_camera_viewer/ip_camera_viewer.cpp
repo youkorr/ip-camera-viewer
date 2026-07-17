@@ -579,11 +579,13 @@ void IPCameraViewer::lvgl_timer_callback_(lv_timer_t *timer) {
           //  - frames > 0 & displayed > 0 -> simple attente (décodage lent, ex. IDR)
           ESP_LOGW(TAG,
                    "No NEW H264 frame for %u ticks — displayed=%u, edge264: frames=%u, "
-                   "decode_errors=%u, started=%d. Rising decode_errors -> NAL feed issue; "
-                   "frames=0 -> get_frame output; otherwise just a slow decode (IDR in "
-                   "progress). (VERBOSE logger for per-NAL detail)",
+                   "decode_errors=%u, started=%d, free PSRAM=%u KB. frames=0 with LOW free "
+                   "PSRAM (< ~2 MB) = the decoder can't allocate its reference frame buffers "
+                   "(DPB) — lower the camera sub-stream resolution/bitrate or free PSRAM. "
+                   "Rising decode_errors instead = a NAL feed issue.",
                    no_frame_count, cam->frame_count_, cam->hp_decoder_.frames_decoded(),
-                   cam->hp_decoder_.decode_errors(), (int) cam->hp_started_);
+                   cam->hp_decoder_.decode_errors(), (int) cam->hp_started_,
+                   (unsigned) (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
         } else
 #endif
           ESP_LOGW(TAG, "No new H264 frame for %u ticks (displayed=%u)", no_frame_count,
