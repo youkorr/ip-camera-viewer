@@ -57,6 +57,12 @@ static inline Edge264Decoder *dec_of(void *p) { return static_cast<Edge264Decode
 H264HpDecoder::~H264HpDecoder() { this->end(); }
 
 bool H264HpDecoder::begin(int n_threads) {
+  // Flux caméra live : pas de B-frames, ordre de décodage == ordre d'affichage.
+  // Sans ceci, un SPS SANS VUI (Reolink...) fait inférer à edge264 jusqu'à 16
+  // frames de réordonnancement à retenir avant la première sortie : secondes de
+  // latence et ~1 Mo de PSRAM par slot DPB (écran noir par épuisement mémoire).
+  edge264_infer_low_delay = 0;
+
 #if defined(USE_H264_HP_EDGE264)
   if (this->dec_ != nullptr)
     return true;

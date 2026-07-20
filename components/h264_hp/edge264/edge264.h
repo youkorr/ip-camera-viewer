@@ -62,6 +62,12 @@ typedef struct Edge264Frame {
 } Edge264Frame;
 
 const uint8_t *edge264_find_start_code(const uint8_t *buf, const uint8_t *end, int four_byte);
+/* Opt-in low-delay inference for live streams: when >= 0 and an SPS carries no
+ * VUI, clamp the inferred max_num_reorder_frames to this value instead of the
+ * spec worst case (MaxDpbFrames, up to 16 buffered frames before any output).
+ * Default -1 keeps strict spec behavior. Set BEFORE feeding the SPS. */
+extern int edge264_infer_low_delay;
+
 Edge264Decoder *edge264_alloc(int n_threads, Edge264LogCb log_cb, void *log_arg, int log_mbs, Edge264AllocCb alloc_cb, Edge264FreeCb free_cb, void *alloc_arg);
 void edge264_flush(Edge264Decoder *dec);
 void edge264_free(Edge264Decoder **pdec);

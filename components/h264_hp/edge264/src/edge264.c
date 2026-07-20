@@ -139,6 +139,10 @@ static int unsup_NAL(Edge264Decoder *dec, Edge264UnrefCb unref_cb, void *unref_a
 
 
 
+// Opt-in low-delay inference for SPS without VUI (see edge264_headers.c).
+// -1 (default) = infer per spec; >=0 = clamp max_num_reorder_frames to this.
+int edge264_infer_low_delay = -1;
+
 Edge264Decoder *edge264_alloc(int n_threads, Edge264LogCb log_cb, void *log_arg, int log_mbs, Edge264AllocCb alloc_cb, Edge264FreeCb free_cb, void *alloc_arg) {
 	Edge264Decoder *dec = aligned_alloc(64, sizeof(*dec)); // maximal SIMD type alignment used in edge264
 	if (dec == NULL)

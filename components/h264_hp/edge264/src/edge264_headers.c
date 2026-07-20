@@ -1984,6 +1984,18 @@ int ADD_VARIANT(parse_seq_parameter_set)(Edge264Decoder *dec, Edge264UnrefCb unr
 		(constraint_set_flags & 1 << 4)) {
 		sps.max_num_reorder_frames = 0;
 		sps.max_dec_frame_buffering = sps.max_num_ref_frames << mvc;
+	} else if (edge264_infer_low_delay >= 0 && dec->nal_unit_type != 15) {
+		// Low-delay override for live streams (opt-in via edge264_infer_low_delay,
+		// default -1 = spec behavior). When the SPS carries NO VUI, the spec makes
+		// us infer max_num_reorder_frames = MaxDpbFrames — 16 at high levels, i.e.
+		// buffer 16 frames before outputting the first. IP cameras emit no
+		// B-frames (decode order == display order), so on memory-tight embedded
+		// targets this both delays output by seconds and exhausts RAM allocating
+		// DPB slots (observed: Reolink Level 5.1 SPS without VUI -> 16x ~1 MB
+		// slots -> allocation failure -> no frame ever output). Streams that DO
+		// declare reordering via VUI are unaffected (parse_vui_parameters path).
+		sps.max_num_reorder_frames = min(edge264_infer_low_delay, MaxDpbFrames);
+		sps.max_dec_frame_buffering = min(max(sps.max_num_ref_frames, sps.max_num_reorder_frames), MaxDpbFrames);
 	} else {
 		sps.max_num_reorder_frames = sps.max_dec_frame_buffering = MaxDpbFrames;
 	}
