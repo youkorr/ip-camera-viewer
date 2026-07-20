@@ -1995,7 +1995,11 @@ int ADD_VARIANT(parse_seq_parameter_set)(Edge264Decoder *dec, Edge264UnrefCb unr
 		// slots -> allocation failure -> no frame ever output). Streams that DO
 		// declare reordering via VUI are unaffected (parse_vui_parameters path).
 		sps.max_num_reorder_frames = min(edge264_infer_low_delay, MaxDpbFrames);
-		sps.max_dec_frame_buffering = min(max(sps.max_num_ref_frames, sps.max_num_reorder_frames), MaxDpbFrames);
+		// +2 de marge au-delà des références : la frame EN COURS de décodage et
+		// celle que l'application détient entre get_frame et return_frame. Sans
+		// cette marge (borne = refs seules), l'allocation du slot courant échoue
+		// et le décodeur cesse de sortir des frames (observé : Tapo, 1 ref).
+		sps.max_dec_frame_buffering = min(max(sps.max_num_ref_frames, sps.max_num_reorder_frames) + 2, MaxDpbFrames);
 	} else {
 		sps.max_num_reorder_frames = sps.max_dec_frame_buffering = MaxDpbFrames;
 	}
